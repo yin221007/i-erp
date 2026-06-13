@@ -51,6 +51,14 @@ export function loadConfig(environment = process.env) {
     },
     deepseek: {
       apiKey: environment.DEEPSEEK_API_KEY?.trim() || ''
+    },
+    uploads: {
+      directory: environment.UPLOAD_DIR?.trim() || '/app/uploads',
+      maxFileSize: positiveInteger(
+        environment.UPLOAD_MAX_BYTES,
+        'UPLOAD_MAX_BYTES',
+        100 * 1024 * 1024
+      )
     }
   };
 }

@@ -18,6 +18,8 @@ services:
       - PUBLIC_ORIGINS=${PUBLIC_ORIGINS}
       - SESSION_SECRET=${SESSION_SECRET}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - UPLOAD_DIR=/app/uploads
+      - UPLOAD_MAX_BYTES=104857600
       - TZ=Asia/Shanghai
     volumes:
       - /volume2/docker/ierp/uploads:/app/uploads

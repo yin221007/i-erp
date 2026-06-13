@@ -1,11 +1,6 @@
 
 import express from 'express';
 import cors from 'cors';
-import bodyParser from 'body-parser';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import imaps from 'imap-simple';
 import { simpleParser } from 'mailparser';
@@ -20,9 +15,7 @@ import {
 import { createAuthRouter } from './server/routes/auth.js';
 import { createRecycleBinRouter } from './server/routes/recycle-bin.js';
 import { createResourceRouter } from './server/routes/resources.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { createUploadsRouter } from './server/routes/uploads.js';
 
 const config = loadConfig();
 const app = express();
@@ -30,46 +23,14 @@ const PORT = config.port;
 
 app.set('trust proxy', config.trustProxy);
 app.use(cors());
-app.use(bodyParser.json({ limit: '51200mb' })); 
-app.use(bodyParser.urlencoded({ limit: '51200mb', extended: true }));
-
-const uploadDir = path.join(__dirname, 'uploads');
-
-function ensureUploadDir() {
-    if (!fs.existsSync(uploadDir)){
-        try {
-            fs.mkdirSync(uploadDir, { recursive: true, mode: 0o777 });
-        } catch (e) { 
-            console.error('[System] Error creating upload directory:', e); 
-        }
-    }
-}
-ensureUploadDir();
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    ensureUploadDir();
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(originalName);
-    cb(null, uniqueSuffix + ext);
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 50 * 1024 * 1024 * 1024 } // 50GB
-});
-
-app.use('/uploads', express.static(uploadDir));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 const pool = createDatabasePool(config.db);
 app.use(authenticateSession({ pool }));
 app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
 app.use('/auth', createAuthRouter({ pool }));
+app.use(createUploadsRouter(config.uploads));
 const RESOURCES = ['projects', 'clients', 'equipment', 'schedule', 'docs', 'archives', 'production', 'users', 'settings', 'payments', 'approvals', 'worklogs', 'messages', 'channels', 'email_configs', 'announcements', 'ai_messages', 'recycle_bin'];
 
 const DEFAULT_ADMIN = { 
@@ -334,14 +295,6 @@ app.post('/backup/import', (req, res) => {
         error: "浏览器数据还原已停用，请使用服务器隔离恢复演练流程",
         restoreProcedure: "scripts/restore-drill.sh"
     });
-});
-
-app.post('/upload', (req, res) => {
-  upload.single('file')(req, res, (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    res.json({ url: `/api/uploads/${req.file.filename}`, filename: req.file.filename });
-  });
 });
 
 app.use(createRecycleBinRouter({ pool }));

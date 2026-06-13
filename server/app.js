@@ -6,6 +6,7 @@ import {
 import { createAuthRouter } from './routes/auth.js';
 import { createRecycleBinRouter } from './routes/recycle-bin.js';
 import { createResourceRouter } from './routes/resources.js';
+import { createUploadsRouter } from './routes/uploads.js';
 
 export function createApp({ pool, config }) {
   if (!pool) throw new Error('pool is required');
@@ -19,6 +20,7 @@ export function createApp({ pool, config }) {
   app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
   app.use('/auth', createAuthRouter({ pool }));
+  if (config.uploads) app.use(createUploadsRouter(config.uploads));
   app.use(createRecycleBinRouter({ pool }));
   app.use(createResourceRouter({ pool }));
   return app;
