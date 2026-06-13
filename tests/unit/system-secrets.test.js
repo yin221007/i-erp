@@ -73,6 +73,7 @@ test('system secrets can be deleted without exposing their previous value', asyn
 
 test('secret masking reveals only the final four characters', () => {
   assert.equal(maskSecret('sk-example-secret-value'), '********alue');
+  assert.equal(maskSecret('abc'), '********');
   assert.equal(maskSecret(''), '');
   assert.equal(maskSecret(null), '');
 });

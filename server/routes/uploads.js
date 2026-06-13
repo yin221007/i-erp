@@ -133,7 +133,7 @@ export function createUploadsRouter({
       }
 
       res.set({
-        'Cache-Control': 'public, max-age=300',
+        'Cache-Control': 'no-cache',
         'Content-Disposition': `inline; filename="${filename}"`,
         'X-Content-Type-Options': 'nosniff'
       });

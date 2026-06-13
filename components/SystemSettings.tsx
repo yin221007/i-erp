@@ -38,6 +38,11 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
     setLocalSettings(settings);
     setDeepSeekApiKey('');
     setAiFeedback('');
+    setAiStatus({
+      configured: false,
+      maskedKey: '',
+      source: 'none'
+    });
     setIsLoadingAi(true);
     apiJson<AiSettingsStatus>(`${API_URL}/ai/settings`)
       .then(status => {
@@ -229,7 +234,13 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
                         <KeyRound className="h-5 w-5 text-orange-500" />
                       )}
                       <span className={`text-sm font-black ${aiStatus.configured ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'}`}>
-                        {isLoadingAi ? '正在读取' : aiStatus.configured ? '已配置' : '未配置'}
+                        {isLoadingAi
+                          ? '正在读取'
+                          : aiStatus.configured
+                            ? aiStatus.source === 'environment'
+                              ? '已由环境变量配置'
+                              : '已配置'
+                            : '未配置'}
                       </span>
                     </div>
                   </div>
@@ -262,7 +273,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
                 )}
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                  {aiStatus.configured && (
+                  {aiStatus.source === 'database' && (
                     <button
                       type="button"
                       onClick={handleClearAiKey}

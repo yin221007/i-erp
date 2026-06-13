@@ -103,5 +103,6 @@ export async function deleteSystemSecret(pool, name) {
 
 export function maskSecret(secret) {
   if (typeof secret !== 'string' || secret.length === 0) return '';
+  if (secret.length <= 4) return '********';
   return `********${secret.slice(-4)}`;
 }
