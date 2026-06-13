@@ -34,7 +34,12 @@ export function createApp({ pool, config, pushService = createPushService() }) {
       secretEncryptionKey: config.secretEncryptionKey
     }));
   }
-  if (config.uploads) app.use(createUploadsRouter(config.uploads));
+  if (config.uploads) {
+    app.use(createUploadsRouter({
+      ...config.uploads,
+      pool
+    }));
+  }
   if (config.mail) {
     app.use(createEmailRouter({
       pool,

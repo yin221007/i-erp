@@ -71,7 +71,8 @@ function isStoredFileName(filename) {
 
 export function createUploadsRouter({
   directory,
-  maxFileSize = DEFAULT_UPLOAD_MAX_BYTES
+  maxFileSize = DEFAULT_UPLOAD_MAX_BYTES,
+  pool
 }) {
   if (!directory) throw new Error('upload directory is required');
   mkdirSync(directory, { recursive: true, mode: 0o750 });
@@ -102,6 +103,51 @@ export function createUploadsRouter({
   });
 
   const router = express.Router();
+
+  router.get('/branding/logo', async (_req, res, next) => {
+    if (!pool) return res.status(404).json({ error: 'Logo not found' });
+
+    try {
+      const [rows] = await pool.query(
+        'SELECT json_data FROM settings WHERE id = ? LIMIT 1',
+        ['global_config']
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Logo not found' });
+      }
+
+      const settings = typeof rows[0].json_data === 'string'
+        ? JSON.parse(rows[0].json_data)
+        : rows[0].json_data;
+      const prefix = '/api/uploads/';
+      const logoUrl = String(settings?.logoUrl || '');
+      const filename = logoUrl.startsWith(prefix)
+        ? logoUrl.slice(prefix.length)
+        : '';
+      const extension = path.extname(filename).toLowerCase();
+      if (
+        !isStoredFileName(filename) ||
+        !['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(extension)
+      ) {
+        return res.status(404).json({ error: 'Logo not found' });
+      }
+
+      res.set({
+        'Cache-Control': 'public, max-age=300',
+        'Content-Disposition': `inline; filename="${filename}"`,
+        'X-Content-Type-Options': 'nosniff'
+      });
+      return res.sendFile(path.join(directory, filename), error => {
+        if (!error) return;
+        if (error.code === 'ENOENT') {
+          return res.status(404).json({ error: 'Logo not found' });
+        }
+        next(error);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
   router.post('/upload', requireAuth, (req, res) => {
     upload.single('file')(req, res, error => {

@@ -136,6 +136,16 @@ function App() {
       }
       return INITIAL_SETTINGS;
   });
+  const displayLogoUrl = useMemo(
+    () => appSettings.logoUrl?.startsWith('/api/uploads/')
+      ? `${API_URL}/branding/logo`
+      : appSettings.logoUrl,
+    [appSettings.logoUrl]
+  );
+  const displaySettings = useMemo(
+    () => ({ ...appSettings, logoUrl: displayLogoUrl }),
+    [appSettings, displayLogoUrl]
+  );
 
   const [userPrefs, setUserPrefs] = useState<UserPreferences>(INITIAL_USER_PREFS);
 
@@ -181,14 +191,14 @@ function App() {
   useEffect(() => {
       const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
       if (link) {
-          link.href = appSettings.logoUrl || '/icon.png';
+          link.href = displayLogoUrl || '/icon.png';
       } else {
           const newLink = document.createElement('link');
           newLink.rel = 'icon';
-          newLink.href = appSettings.logoUrl || '/icon.png';
+          newLink.href = displayLogoUrl || '/icon.png';
           document.head.appendChild(newLink);
       }
-  }, [appSettings.logoUrl, appSettings.appName]);
+  }, [displayLogoUrl, appSettings.appName]);
 
   useEffect(() => {
       if (!isAuthenticated || connectionStatus !== 'connected') return;
@@ -329,7 +339,7 @@ function App() {
       try { 
           const notification = new Notification(title, { 
               body, 
-              icon: appSettings.logoUrl || '/icon.png', 
+              icon: displayLogoUrl || '/icon.png',
               tag: category,
               requireInteraction: false
           });
@@ -1126,7 +1136,7 @@ function App() {
                   fetchData(u.id);
               }} 
               appName={appSettings?.appName} 
-              logoUrl={appSettings?.logoUrl} 
+              logoUrl={displayLogoUrl}
           />
       );
   }
@@ -1140,7 +1150,7 @@ function App() {
           isOpen={sidebarOpen} 
           onClose={() => setSidebarOpen(false)} 
           currentUser={currentUser} 
-          settings={appSettings} 
+          settings={displaySettings}
           onOpenSettings={() => setIsSettingsOpen(true)} 
           onOpenUserPrefs={() => setIsUserPrefsOpen(true)} 
           onLogout={handleLogout} 
@@ -1153,7 +1163,7 @@ function App() {
             currentUser={currentUser} 
             allUsers={users} 
             onSwitchUser={() => {}} 
-            settings={appSettings} 
+            settings={displaySettings}
             notifications={notifications} 
             onMarkAllRead={markAllNotificationsAsRead} 
             onDeleteNotification={handleDeleteNotification} 

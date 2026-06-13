@@ -11,8 +11,17 @@ const cookie = `ierp_session=${token}`;
 const origin = 'https://erp.example.test';
 
 class UploadTestPool {
+  constructor(logoUrl = '') {
+    this.logoUrl = logoUrl;
+  }
+
   async query(sql) {
     const normalized = sql.replace(/\s+/g, ' ').trim();
+    if (normalized.startsWith('SELECT json_data FROM settings WHERE id = ?')) {
+      return [this.logoUrl ? [{
+        json_data: JSON.stringify({ logoUrl: this.logoUrl })
+      }] : [], []];
+    }
     if (normalized.includes('FROM auth_sessions AS sessions')) {
       return [[{
         session_id: 'session-1',
@@ -33,7 +42,10 @@ class UploadTestPool {
   }
 }
 
-async function withUploadApp(callback, { maxFileSize = 100 } = {}) {
+async function withUploadApp(
+  callback,
+  { maxFileSize = 100, logoUrl = '' } = {}
+) {
   const uploadDirectory = await mkdtemp(path.join(tmpdir(), 'ierp-upload-'));
   const config = {
     trustProxy: 1,
@@ -44,7 +56,10 @@ async function withUploadApp(callback, { maxFileSize = 100 } = {}) {
     }
   };
   try {
-    await callback(createApp({ pool: new UploadTestPool(), config }), uploadDirectory);
+    await callback(
+      createApp({ pool: new UploadTestPool(logoUrl), config }),
+      uploadDirectory
+    );
   } finally {
     await rm(uploadDirectory, { recursive: true, force: true });
   }
@@ -172,5 +187,25 @@ test('stored-file access rejects arbitrary and unsupported filenames', async () 
       .get('/uploads/1769674116177-400514667.js')
       .set('Cookie', cookie)
       .expect(404);
+  });
+});
+
+test('only the configured application logo is publicly readable', async () => {
+  const filename = '1767161533189-876402811.png';
+  await withUploadApp(async (app, uploadDirectory) => {
+    await writeFile(path.join(uploadDirectory, filename), 'png-data');
+
+    const response = await request(app)
+      .get('/branding/logo')
+      .expect(200);
+
+    assert.match(response.headers['content-disposition'], /^inline;/);
+    assert.equal(response.headers['x-content-type-options'], 'nosniff');
+
+    await request(app)
+      .get(`/uploads/${filename}`)
+      .expect(401);
+  }, {
+    logoUrl: `/api/uploads/${filename}`
   });
 });

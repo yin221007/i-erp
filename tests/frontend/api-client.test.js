@@ -92,3 +92,10 @@ test('system settings manages DeepSeek through the dedicated secret API', async 
   assert.match(source, /DeepSeek/);
   assert.doesNotMatch(source, /localSettings[^;\n]*apiKey/);
 });
+
+test('application branding uses the public logo endpoint before login', async () => {
+  const source = await readFile(appUrl, 'utf8');
+
+  assert.match(source, /\/branding\/logo/);
+  assert.match(source, /logoUrl=\{displayLogoUrl\}/);
+});
