@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+RUN apk add --no-cache \
+    bash \
+    coreutils \
+    findutils \
+    gzip \
+    mariadb-client \
+    tar \
+    tzdata
+
+WORKDIR /app
+
+COPY scripts ./scripts
+COPY server/services/backup.js ./server/services/backup.js
+
+CMD ["bash", "scripts/backup.sh"]

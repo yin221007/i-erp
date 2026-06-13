@@ -39,6 +39,34 @@ services:
     environment:
       - TZ=Asia/Shanghai
 
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    profiles:
+      - backup
+    restart: "no"
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      - DB_HOST=192.168.100.8
+      - DB_USER=yinierp
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=ierp
+      - DB_PORT=3306
+      - BACKUP_ROOT=/backups
+      - UPLOADS_ROOT=/data/uploads
+      - DEPLOY_ROOT=/data/deploy
+      - BACKUP_KIND=${BACKUP_KIND:-daily}
+      - BACKUP_CAPACITY_BYTES=536870912000
+      - MIN_FREE_BYTES=21474836480
+      - MIN_FREE_PERCENT=10
+      - TZ=Asia/Shanghai
+    volumes:
+      - /volume2/docker/ierp-backups:/backups
+      - /volume2/docker/ierp/uploads:/data/uploads:ro
+      - /volume2/docker/ierp:/data/deploy:ro
+
 networks:
   default:
     name: ierp-net
