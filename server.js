@@ -13,6 +13,11 @@ import crypto from 'crypto';
 import { loadConfig } from './server/config.js';
 import { createDatabasePool } from './server/db.js';
 import { runMigrations } from './server/migrations.js';
+import {
+  authenticateSession,
+  enforceOrigin
+} from './server/auth/middleware.js';
+import { createAuthRouter } from './server/routes/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +65,9 @@ const upload = multer({
 app.use('/uploads', express.static(uploadDir));
 
 const pool = createDatabasePool(config.db);
+app.use(authenticateSession({ pool }));
+app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
+app.use('/auth', createAuthRouter({ pool }));
 const RESOURCES = ['projects', 'clients', 'equipment', 'schedule', 'docs', 'archives', 'production', 'users', 'settings', 'payments', 'approvals', 'worklogs', 'messages', 'channels', 'email_configs', 'announcements', 'ai_messages', 'recycle_bin'];
 
 const DEFAULT_ADMIN = { 
@@ -167,22 +175,11 @@ const initDB = async () => {
 };
 
 const authMiddleware = async (req, res, next) => {
-    const userId = req.headers['x-user-id'];
-    req.userId = userId; 
-    req.isSuperAdmin = false;
-    if (!userId) return next();
-    
-    try {
-        const [rows] = await pool.query('SELECT json_data FROM users WHERE id = ?', [userId]);
-        if (rows.length > 0) {
-            let userData = safeParseJSON(rows[0].json_data);
-            if (userData) {
-                req.userNickname = userData.nickname;
-                req.isSuperAdmin = userData.isDefaultAdmin === true;
-                req.userPreferences = userData.preferences;
-            }
-        }
-    } catch (e) {}
+    const userData = req.authUser;
+    req.userId = userData?.id || null;
+    req.isSuperAdmin = userData?.isDefaultAdmin === true;
+    req.userNickname = userData?.nickname;
+    req.userPreferences = userData?.preferences;
     next();
 };
 
