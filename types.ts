@@ -262,6 +262,29 @@ export interface AppSettings {
   erpBaseUrl?: string; 
 }
 
+export interface BackupSnapshot {
+  id: string;
+  kind: 'daily' | 'upgrade' | 'manual' | 'pre-restore';
+  status: 'complete' | 'invalid';
+  createdAt: string | null;
+  sizeBytes: number;
+  uploadFileCount: number;
+  locked: boolean;
+  restoreDrillVerified: boolean;
+  selectable: boolean;
+  issues: string[];
+}
+
+export interface MaintenanceJob {
+  id: string;
+  operation: 'backup' | 'restore';
+  backupId: string | null;
+  state: 'pending' | 'running' | 'completed' | 'failed';
+  phase: string;
+  message: string;
+  updatedAt: string;
+}
+
 export type NotificationType = 'success' | 'error' | 'info';
 export type NotificationCategory = 'System' | 'Chat' | 'Approval' | 'Task'; 
 
