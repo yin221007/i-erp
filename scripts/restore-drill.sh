@@ -116,4 +116,13 @@ if [[ "$actual_upload_count" != "$expected_upload_count" ]]; then
   exit 65
 fi
 
+manifest_sha256="$(sha256sum "$BACKUP_DIR/manifest.sha256" | awk '{ print $1 }')"
+marker_tmp="$BACKUP_DIR/.restore-drill.ok.$$"
+printf '%s\n' \
+  'status=success' \
+  "manifest_sha256=$manifest_sha256" \
+  "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  > "$marker_tmp"
+mv "$marker_tmp" "$BACKUP_DIR/restore-drill.ok"
+
 printf 'Restore drill passed using temporary database: %s\n' "$restore_database"

@@ -36,6 +36,13 @@ test('backup script writes checksums and metadata before atomic promotion', asyn
   assert.match(source, /\bmv\b/);
 });
 
+test('backup counts the tables that actually exist in legacy or current schemas', async () => {
+  const source = await readFile(scriptUrl, 'utf8');
+
+  assert.match(source, /SHOW TABLES/);
+  assert.doesNotMatch(source, /resource_tables=\(/);
+});
+
 test('backup script is valid Bash syntax', () => {
   const result = spawnSync('/bin/bash', ['-n', scriptUrl.pathname], {
     encoding: 'utf8'

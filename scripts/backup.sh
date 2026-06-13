@@ -91,31 +91,12 @@ tar \
   --directory="$UPLOADS_ROOT" \
   .
 
-resource_tables=(
-  projects
-  clients
-  equipment
-  schedule
-  docs
-  archives
-  production
-  users
-  settings
-  payments
-  approvals
-  worklogs
-  messages
-  channels
-  email_configs
-  announcements
-  ai_messages
-  recycle_bin
-  schema_migrations
-  auth_sessions
-)
-
 : > "$incomplete_directory/table-counts.tsv"
-for table_name in "${resource_tables[@]}"; do
+while IFS= read -r table_name; do
+  if [[ ! "$table_name" =~ ^[A-Za-z0-9_]+$ ]]; then
+    printf 'Database returned an invalid table name: %s\n' "$table_name" >&2
+    exit 65
+  fi
   table_count="$(
     mariadb \
       --batch \
@@ -129,7 +110,17 @@ for table_name in "${resource_tables[@]}"; do
   )"
   printf '%s\t%s\n' "$table_name" "$table_count" \
     >> "$incomplete_directory/table-counts.tsv"
-done
+done < <(
+  mariadb \
+    --batch \
+    --skip-column-names \
+    --host="$DB_HOST" \
+    --port="${DB_PORT:-3306}" \
+    --user="$DB_USER" \
+    --password="$DB_PASSWORD" \
+    "$DB_NAME" \
+    --execute="SHOW TABLES"
+)
 
 if [[ -n "${DEPLOY_ROOT:-}" && -d "$DEPLOY_ROOT" ]]; then
   deployment_files=()
