@@ -91,6 +91,46 @@ tar \
   --directory="$UPLOADS_ROOT" \
   .
 
+resource_tables=(
+  projects
+  clients
+  equipment
+  schedule
+  docs
+  archives
+  production
+  users
+  settings
+  payments
+  approvals
+  worklogs
+  messages
+  channels
+  email_configs
+  announcements
+  ai_messages
+  recycle_bin
+  schema_migrations
+  auth_sessions
+)
+
+: > "$incomplete_directory/table-counts.tsv"
+for table_name in "${resource_tables[@]}"; do
+  table_count="$(
+    mariadb \
+      --batch \
+      --skip-column-names \
+      --host="$DB_HOST" \
+      --port="${DB_PORT:-3306}" \
+      --user="$DB_USER" \
+      --password="$DB_PASSWORD" \
+      "$DB_NAME" \
+      --execute="SELECT COUNT(*) FROM \`$table_name\`"
+  )"
+  printf '%s\t%s\n' "$table_name" "$table_count" \
+    >> "$incomplete_directory/table-counts.tsv"
+done
+
 if [[ -n "${DEPLOY_ROOT:-}" && -d "$DEPLOY_ROOT" ]]; then
   deployment_files=()
   for file_name in docker-compose.yml nginx.conf; do

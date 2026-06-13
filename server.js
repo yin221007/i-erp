@@ -328,24 +328,12 @@ app.get('/backup/export', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/backup/import', async (req, res) => {
+app.post('/backup/import', (req, res) => {
     if (!req.isSuperAdmin) return res.status(403).json({ error: "权限不足" });
-    const backupData = req.body;
-    let connection;
-    try {
-        connection = await pool.getConnection();
-        await connection.beginTransaction();
-        for (const resource of RESOURCES) {
-            const tableData = backupData.tables[resource];
-            if (!tableData) continue;
-            await connection.query(`TRUNCATE TABLE \`${resource}\``);
-            for (const item of tableData) {
-                await connection.query(`INSERT INTO \`${resource}\` (id, json_data) VALUES (?, ?)`, [item.id, JSON.stringify(item.json_data)]);
-            }
-        }
-        await connection.commit();
-        res.json({ success: true });
-    } catch (err) { if (connection) await connection.rollback(); res.status(500).json({ error: err.message }); } finally { if (connection) connection.release(); }
+    return res.status(410).json({
+        error: "浏览器数据还原已停用，请使用服务器隔离恢复演练流程",
+        restoreProcedure: "scripts/restore-drill.sh"
+    });
 });
 
 app.post('/upload', (req, res) => {
