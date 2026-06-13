@@ -22,6 +22,7 @@ test('configuration uses only the supplied database password', () => {
   const config = loadConfig(validEnvironment);
 
   assert.equal(config.db.password, 'secret');
+  assert.equal(config.secretEncryptionKey, validEnvironment.SESSION_SECRET);
 });
 
 test('session secret must contain at least 32 characters', () => {

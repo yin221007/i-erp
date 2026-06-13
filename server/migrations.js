@@ -113,6 +113,19 @@ async function createAiTables(connection) {
   }
 }
 
+async function createSystemSecretsTable(connection) {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS system_secrets (
+      name VARCHAR(64) NOT NULL,
+      ciphertext TEXT NOT NULL,
+      iv VARCHAR(64) NOT NULL,
+      auth_tag VARCHAR(64) NOT NULL,
+      updated_at DATETIME(3) NOT NULL,
+      PRIMARY KEY (name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
 async function migrateUserPasswords(connection, { passwordHasher }) {
   const [rows] = await connection.query(
     'SELECT id, json_data FROM users ORDER BY id FOR UPDATE'
@@ -184,6 +197,11 @@ const MIGRATIONS = Object.freeze([
     version: '004_create_ai_tables',
     transactional: false,
     up: createAiTables
+  },
+  {
+    version: '005_create_system_secrets',
+    transactional: false,
+    up: createSystemSecretsTable
   }
 ]);
 

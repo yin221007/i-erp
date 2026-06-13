@@ -53,6 +53,7 @@ export function loadConfig(environment = process.env) {
     port: positiveInteger(environment.PORT, 'PORT', 3000),
     trustProxy: positiveInteger(environment.TRUST_PROXY, 'TRUST_PROXY', 1),
     publicOrigins: [...new Set(publicOrigins)],
+    secretEncryptionKey: sessionSecret,
     db: {
       host: required(environment, 'DB_HOST'),
       port: positiveInteger(environment.DB_PORT, 'DB_PORT', 3306),

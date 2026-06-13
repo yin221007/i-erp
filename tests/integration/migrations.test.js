@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runMigrations } from '../../server/migrations.js';
+import {
+  MIGRATION_VERSIONS,
+  runMigrations
+} from '../../server/migrations.js';
 import {
   hashPassword,
   verifyPassword
@@ -184,4 +187,14 @@ test('AI model migration seeds current official models idempotently', async () =
     'deepseek-v4-pro'
   ]);
   assert.equal(database.migrations.has('004_create_ai_tables'), true);
+});
+
+test('system secret storage is added through an idempotent additive migration', async () => {
+  const database = new FakeMigrationDatabase();
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.equal(MIGRATION_VERSIONS.at(-1), '005_create_system_secrets');
+  assert.equal(database.migrations.has('005_create_system_secrets'), true);
 });
