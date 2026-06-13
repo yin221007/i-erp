@@ -19,6 +19,7 @@ RUN npm install --production
 
 # 复制服务端代码
 COPY server.js ./
+COPY server ./server
 
 # 创建上传目录并授权
 RUN mkdir -p uploads && chmod 777 uploads
