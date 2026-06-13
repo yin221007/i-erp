@@ -12,6 +12,7 @@ import { simpleParser } from 'mailparser';
 import crypto from 'crypto';
 import { loadConfig } from './server/config.js';
 import { createDatabasePool } from './server/db.js';
+import { runMigrations } from './server/migrations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,9 +158,12 @@ const initDB = async () => {
 
   } catch (err) {
     console.error("[DB] Initialization Error:", err);
+    throw err;
   } finally {
     if (connection) connection.release();
   }
+
+  await runMigrations(pool);
 };
 
 const authMiddleware = async (req, res, next) => {
@@ -432,7 +436,12 @@ app.post('/:resource', async (req, res) => {
     }
 });
 
-initDB().then(() => { 
-    const server = app.listen(PORT, () => console.log(`i ERP Server running on port ${PORT}`));
-    server.timeout = 3600000;
-});
+initDB()
+  .then(() => {
+      const server = app.listen(PORT, () => console.log(`i ERP Server running on port ${PORT}`));
+      server.timeout = 3600000;
+  })
+  .catch(error => {
+      console.error('[System] Startup aborted:', error);
+      process.exitCode = 1;
+  });
