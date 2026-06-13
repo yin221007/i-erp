@@ -40,6 +40,20 @@ async function prepareRecord(resource, user, input, routeId) {
   }
 
   if (resource === 'ai_messages') record.userId = user.id;
+  if (resource === 'messages') {
+    record.userId = user.id;
+    record.userName = user.nickname;
+    record.userAvatar = user.avatar || '';
+  }
+  if (resource === 'announcements') {
+    record.creatorId = user.id;
+    record.creatorName = user.nickname;
+  }
+  if (resource === 'approvals' && !routeId) {
+    record.applicantId = user.id;
+    record.applicantName = user.nickname;
+    record.department = user.department;
+  }
 
   if (
     resource === 'users' &&
@@ -84,13 +98,31 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         return res.status(403).json({ error: 'Write access denied' });
       }
 
+      let previousRecord = null;
+      if (resource === 'approvals' && onRecordSaved) {
+        const [rows] = await pool.query(
+          'SELECT json_data FROM approvals WHERE id = ? LIMIT 1',
+          [record.id]
+        );
+        if (rows.length > 0) {
+          previousRecord = parseJson(
+            rows[0].json_data,
+            `approvals/${record.id}`
+          );
+        }
+      }
       await pool.query(
         `REPLACE INTO \`${resource}\`
           (id, json_data, updated_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)`,
         [record.id, JSON.stringify(record)]
       );
-      if (onRecordSaved) await onRecordSaved(resource, record, 'create');
+      if (onRecordSaved) {
+        await onRecordSaved(resource, record, 'create', {
+          actor: req.authUser,
+          previousRecord
+        });
+      }
       res.status(201).json(sanitizeResourceRecord(resource, record));
     } catch (error) {
       next(error);
@@ -105,13 +137,28 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         return res.status(403).json({ error: 'Write access denied' });
       }
 
+      let previousRecord = null;
+      if (resource === 'approvals' && onRecordSaved) {
+        const [rows] = await pool.query(
+          'SELECT json_data FROM approvals WHERE id = ? LIMIT 1',
+          [id]
+        );
+        if (rows.length > 0) {
+          previousRecord = parseJson(rows[0].json_data, `approvals/${id}`);
+        }
+      }
       await pool.query(
         `REPLACE INTO \`${resource}\`
           (id, json_data, updated_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)`,
         [id, JSON.stringify(record)]
       );
-      if (onRecordSaved) await onRecordSaved(resource, record, 'update');
+      if (onRecordSaved) {
+        await onRecordSaved(resource, record, 'update', {
+          actor: req.authUser,
+          previousRecord
+        });
+      }
       res.json(sanitizeResourceRecord(resource, record));
     } catch (error) {
       next(error);

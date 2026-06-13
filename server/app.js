@@ -13,6 +13,7 @@ import { createRecycleBinRouter } from './routes/recycle-bin.js';
 import { createResourceRouter } from './routes/resources.js';
 import { createUploadsRouter } from './routes/uploads.js';
 import { createMailService } from './services/mail.js';
+import { createNotificationDispatcher } from './services/notification-events.js';
 import { createPushService } from './services/push.js';
 
 export function createApp({ pool, config, pushService = createPushService() }) {
@@ -20,6 +21,10 @@ export function createApp({ pool, config, pushService = createPushService() }) {
   if (!config) throw new Error('config is required');
 
   const app = express();
+  const notificationDispatcher = createNotificationDispatcher({
+    pool,
+    pushService
+  });
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy || 1);
   app.use(express.json({ limit: '2mb' }));
@@ -49,6 +54,9 @@ export function createApp({ pool, config, pushService = createPushService() }) {
   app.use(createPushRouter({ pushService }));
   app.use(createBackupRouter());
   app.use(createRecycleBinRouter({ pool }));
-  app.use(createResourceRouter({ pool }));
+  app.use(createResourceRouter({
+    pool,
+    onRecordSaved: notificationDispatcher
+  }));
   return app;
 }
