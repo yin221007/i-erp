@@ -20,6 +20,22 @@ function normalizeOrigin(value) {
   return url.origin;
 }
 
+function endpointAllowlist(value, defaults) {
+  const entries = (value || defaults).split(',').map(entry => entry.trim());
+  const result = new Map();
+  for (const entry of entries) {
+    const [hostValue, portValue] = entry.split(':');
+    const host = hostValue?.trim().toLowerCase();
+    const port = positiveInteger(portValue, 'mail endpoint port');
+    if (!host || !/^[a-z0-9.-]+$/.test(host)) {
+      throw new Error('Mail endpoint host is invalid');
+    }
+    if (!result.has(host)) result.set(host, new Set());
+    result.get(host).add(port);
+  }
+  return result;
+}
+
 export function loadConfig(environment = process.env) {
   const sessionSecret = required(environment, 'SESSION_SECRET');
   if (sessionSecret.length < 32) {
@@ -58,6 +74,21 @@ export function loadConfig(environment = process.env) {
         environment.UPLOAD_MAX_BYTES,
         'UPLOAD_MAX_BYTES',
         100 * 1024 * 1024
+      )
+    },
+    mail: {
+      allowedImapHosts: endpointAllowlist(
+        environment.MAIL_ALLOWED_IMAP_ENDPOINTS,
+        'imap.qq.com:993,hwimap.exmail.qq.com:993'
+      ),
+      allowedSmtpHosts: endpointAllowlist(
+        environment.MAIL_ALLOWED_SMTP_ENDPOINTS,
+        'smtp.qq.com:465,hwsmtp.exmail.qq.com:465'
+      ),
+      maxMessageBytes: positiveInteger(
+        environment.MAIL_MAX_MESSAGE_BYTES,
+        'MAIL_MAX_MESSAGE_BYTES',
+        10 * 1024 * 1024
       )
     }
   };

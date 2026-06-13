@@ -1,9 +1,6 @@
 
 import express from 'express';
 import cors from 'cors';
-import nodemailer from 'nodemailer';
-import imaps from 'imap-simple';
-import { simpleParser } from 'mailparser';
 import crypto from 'crypto';
 import { loadConfig } from './server/config.js';
 import { createDatabasePool } from './server/db.js';
@@ -13,9 +10,11 @@ import {
   enforceOrigin
 } from './server/auth/middleware.js';
 import { createAuthRouter } from './server/routes/auth.js';
+import { createEmailRouter } from './server/routes/email.js';
 import { createRecycleBinRouter } from './server/routes/recycle-bin.js';
 import { createResourceRouter } from './server/routes/resources.js';
 import { createUploadsRouter } from './server/routes/uploads.js';
+import { createMailService } from './server/services/mail.js';
 
 const config = loadConfig();
 const app = express();
@@ -147,120 +146,10 @@ const authMiddleware = async (req, res, next) => {
 };
 
 app.use(authMiddleware);
-
-// --- 增强邮件抓取路由 (严格执行最新 30 封限制) ---
-app.get('/email/fetch', async (req, res) => {
-    if (!req.userId) return res.status(401).json({ error: "权限认证失效" });
-    
-    let connection = null;
-    try {
-        const [configRows] = await pool.query('SELECT json_data FROM email_configs WHERE id = ?', [req.userId]);
-        if (configRows.length === 0) return res.status(404).json({ error: "本账户未配置业务邮箱参数" });
-        
-        const config = safeParseJSON(configRows[0].json_data);
-        
-        // 针对腾讯邮箱服务器的特定安全策略优化
-        const imapConfig = {
-            imap: {
-                user: config.email,
-                password: config.authCode,
-                host: config.imapHost,
-                // 如果是腾讯相关服务，强制启用 993/TLS
-                port: (config.imapHost.includes('qq.com') || config.imapHost.includes('tencent')) ? 993 : config.imapPort,
-                tls: true,
-                authTimeout: 45000, // 腾讯服务器认证有时较慢，增加时长
-                connTimeout: 45000,
-                // 忽略自签名证书错误（防止部分内网代理环境报错）
-                tlsOptions: { rejectUnauthorized: false }
-            }
-        };
-
-        connection = await imaps.connect(imapConfig);
-        await connection.openBox('INBOX');
-        const searchCriteria = ['ALL'];
-        const fetchOptions = { bodies: ['HEADER', 'TEXT', ''], struct: true };
-        const results = await connection.search(searchCriteria, fetchOptions);
-        
-        /**
-         * 核心：严格限制仅抓取最近 30 封邮件
-         * results.slice(-30) 提取数组末尾（最新的）30个元素
-         */
-        const emails = await Promise.all(results.slice(-30).map(async (item) => {
-            try {
-                const all = item.parts.find(part => part.which === '');
-                const id = item.attributes.uid;
-                const parsed = await simpleParser(all.body);
-                
-                const attachments = (parsed.attachments || []).map(att => ({
-                    filename: att.filename || '未命名附件',
-                    contentType: att.contentType,
-                    size: att.size,
-                    content: att.content ? att.content.toString('base64') : null
-                }));
-
-                return {
-                    id: id.toString(),
-                    from: parsed.from ? parsed.from.text : '未知发件人',
-                    to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to.map(t => t.text).join(',') : parsed.to.text) : '',
-                    subject: parsed.subject || '(无主题)',
-                    date: parsed.date || new Date().toISOString(),
-                    text: parsed.text || '',
-                    html: parsed.html || '',
-                    seen: item.attributes.flags.includes('\\Seen'),
-                    attachments
-                };
-            } catch (innerErr) {
-                console.warn(`[Mail] 解析单封邮件 ID ${item.attributes.uid} 失败:`, innerErr.message);
-                return null;
-            }
-        }));
-
-        const validEmails = emails.filter(e => e !== null);
-        res.json(validEmails.reverse()); // 保持展示顺序为最新在上
-    } catch (err) {
-        console.error("[IMAP Server Error]:", err);
-        // 针对腾讯邮箱常见的授权失败返回友好提示
-        const errMsg = err.message.toLowerCase();
-        if (errMsg.includes('login failed') || errMsg.includes('authenticate')) {
-            res.status(401).json({ error: "IMAP 认证失败：请核对是否使用的是 16 位授权码，而非普通密码。" });
-        } else {
-            res.status(500).json({ error: "邮件同步失败：" + err.message });
-        }
-    } finally {
-        if (connection) {
-            try { connection.end(); } catch(e) {}
-        }
-    }
-});
-
-// --- 邮件发送路由 ---
-app.post('/email/send', async (req, res) => {
-    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
-    const { to, subject, text } = req.body;
-
-    try {
-        const [configRows] = await pool.query('SELECT json_data FROM email_configs WHERE id = ?', [req.userId]);
-        if (configRows.length === 0) throw new Error("SMTP 未配置");
-        const config = safeParseJSON(configRows[0].json_data);
-        
-        const transporter = nodemailer.createTransport({
-            host: config.smtpHost,
-            port: config.smtpPort,
-            secure: config.smtpPort === 465,
-            auth: { user: config.email, pass: config.authCode },
-            timeout: 30000,
-            tls: {
-                ciphers: 'SSLv3',
-                rejectUnauthorized: false
-            }
-        });
-
-        await transporter.sendMail({ from: config.email, to, subject, text });
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: "发送失败：" + err.message });
-    }
-});
+app.use(createEmailRouter({
+    pool,
+    mailService: createMailService(config.mail)
+}));
 
 // --- 推送测试路由 ---
 app.post('/push/test', async (req, res) => {

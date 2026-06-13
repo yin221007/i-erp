@@ -4,9 +4,11 @@ import {
   enforceOrigin
 } from './auth/middleware.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createEmailRouter } from './routes/email.js';
 import { createRecycleBinRouter } from './routes/recycle-bin.js';
 import { createResourceRouter } from './routes/resources.js';
 import { createUploadsRouter } from './routes/uploads.js';
+import { createMailService } from './services/mail.js';
 
 export function createApp({ pool, config }) {
   if (!pool) throw new Error('pool is required');
@@ -21,6 +23,12 @@ export function createApp({ pool, config }) {
   app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
   app.use('/auth', createAuthRouter({ pool }));
   if (config.uploads) app.use(createUploadsRouter(config.uploads));
+  if (config.mail) {
+    app.use(createEmailRouter({
+      pool,
+      mailService: createMailService(config.mail)
+    }));
+  }
   app.use(createRecycleBinRouter({ pool }));
   app.use(createResourceRouter({ pool }));
   return app;

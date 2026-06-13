@@ -14,16 +14,10 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'inbox' | 'compose' | 'settings'>('inbox');
   const [config, setConfig] = useState<EmailConfig | null>(null);
   
-  // 核心：初始化时优先从本地缓存读取，解决 UI 闪烁问题
-  const [messages, setMessages] = useState<EmailMessage[]>(() => {
-      const cached = localStorage.getItem(`ierp_email_cache_${currentUser.id}`);
-      if (cached) {
-          try { return JSON.parse(cached); } catch(e) { return []; }
-      }
-      return [];
-  });
+  const [messages, setMessages] = useState<EmailMessage[]>([]);
 
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
+  const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -102,7 +96,6 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
               const data = await res.json();
               if (Array.isArray(data)) {
                   setMessages(data);
-                  localStorage.setItem(`ierp_email_cache_${currentUser.id}`, JSON.stringify(data));
               } else {
                   setErrorMessage("服务器返回数据格式异常");
               }
@@ -194,18 +187,15 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
       }
   };
 
-  const handleDownloadAttachment = (att: any) => {
-      if (!att.content) return alert("附件流缺失，请点击刷新按钮重新同步此邮件。");
+  const handleDownloadAttachment = async (att: any) => {
+      if (!selectedMessage) return;
       try {
-          const byteCharacters = atob(att.content);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: att.contentType || 'application/octet-stream' });
-          
-          const url = window.URL.createObjectURL(blob);
+          const res = await fetch(
+              `${API_URL}/email/messages/${encodeURIComponent(selectedMessage.id)}/attachments/${encodeURIComponent(att.part)}`
+          );
+          if (!res.ok) throw new Error('Attachment download failed');
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
           link.download = att.filename;
@@ -225,8 +215,24 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
       return <Paperclip className="w-4 h-4 text-primary-500" />;
   };
 
-  const handleMessageSelect = (msg: EmailMessage) => {
+  const handleMessageSelect = async (msg: EmailMessage) => {
       setSelectedMessage(msg);
+      setIsLoadingMessage(true);
+      setErrorMessage(null);
+      try {
+          const res = await fetch(
+              `${API_URL}/email/messages/${encodeURIComponent(msg.id)}`
+          );
+          if (!res.ok) {
+              const error = await res.json().catch(() => ({}));
+              throw new Error(error.error || '邮件正文读取失败');
+          }
+          setSelectedMessage(await res.json());
+      } catch (error: any) {
+          setErrorMessage(error.message || '邮件正文读取失败');
+      } finally {
+          setIsLoadingMessage(false);
+      }
   };
 
   const handleBackToInbox = () => {
@@ -391,14 +397,18 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
                                   </div>
 
                                   <div className="flex-1 overflow-y-auto p-4 md:p-12 bg-slate-200 dark:bg-slate-950 custom-scrollbar">
-                                      {selectedMessage.html ? (
+                                      {isLoadingMessage ? (
+                                          <div className="bg-white dark:bg-slate-800 p-14 rounded-[3rem] shadow-2xl min-h-full flex items-center justify-center">
+                                              <Loader2 className="w-10 h-10 text-primary-500 animate-spin" />
+                                          </div>
+                                      ) : selectedMessage.html ? (
                                           <div 
                                               className="prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-800 p-6 md:p-14 rounded-2xl md:rounded-[3rem] shadow-2xl border border-slate-200 dark:border-slate-700 min-h-full transition-all"
                                               dangerouslySetInnerHTML={{ __html: selectedMessage.html }}
                                           />
                                       ) : (
                                           <div className="bg-white dark:bg-slate-800 p-6 md:p-14 rounded-2xl md:rounded-[3rem] shadow-2xl border border-slate-200 dark:border-slate-700 min-h-full">
-                                              <pre className="whitespace-pre-wrap font-sans text-xs md:text-sm text-slate-700 dark:text-slate-200 leading-relaxed font-medium">{selectedMessage.text}</pre>
+                                              <pre className="whitespace-pre-wrap font-sans text-xs md:text-sm text-slate-700 dark:text-slate-200 leading-relaxed font-medium">{selectedMessage.text || ''}</pre>
                                           </div>
                                       )}
                                   </div>

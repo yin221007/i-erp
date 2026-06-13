@@ -395,11 +395,10 @@ export interface EmailConfig {
 }
 
 export interface EmailAttachment {
+  part: string;
   filename: string;
   contentType: string;
   size: number;
-  content?: any; 
-  checksum?: string;
 }
 
 export interface EmailMessage {
@@ -408,8 +407,9 @@ export interface EmailMessage {
   to: string;
   subject: string;
   date: string;
-  text: string;
+  text?: string;
   html?: string;
+  size?: number;
   seen: boolean;
   attachments?: EmailAttachment[];
 }

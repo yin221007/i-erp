@@ -41,6 +41,46 @@ initialization rather than relying on a preceding `cd`.
 
 ---
 
+## [ERR-20260613-003] npm-registry-dns
+
+**Logged**: 2026-06-13T17:30:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: config
+
+### Summary
+
+The configured npm mirror could not be resolved while checking mail package
+versions.
+
+### Error
+
+```text
+getaddrinfo ENOTFOUND registry.npmmirror.com
+```
+
+### Context
+
+- The command was an npm package metadata lookup.
+- The project itself and installed dependencies were unaffected.
+
+### Suggested Fix
+
+Use `--registry=https://registry.npmjs.org` for dependency metadata, installs,
+and audits in this environment.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `package.json`, `package-lock.json`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T17:30:00+08:00
+- **Notes**: Switched subsequent npm network operations to the official registry.
+
+---
+
 ## [ERR-20260613-002] shell-pattern-quoting
 
 **Logged**: 2026-06-13T14:30:00+08:00
