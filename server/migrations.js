@@ -187,6 +187,10 @@ const MIGRATIONS = Object.freeze([
   }
 ]);
 
+export const MIGRATION_VERSIONS = Object.freeze(
+  MIGRATIONS.map(migration => migration.version)
+);
+
 async function ensureMigrationTable(connection) {
   await connection.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (

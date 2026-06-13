@@ -12,6 +12,7 @@ import {
 import { createAuthRouter } from './server/routes/auth.js';
 import { createAiRouter } from './server/routes/ai.js';
 import { createEmailRouter } from './server/routes/email.js';
+import { createHealthRouter } from './server/routes/health.js';
 import { createRecycleBinRouter } from './server/routes/recycle-bin.js';
 import { createResourceRouter } from './server/routes/resources.js';
 import { createUploadsRouter } from './server/routes/uploads.js';
@@ -35,6 +36,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 const pool = createDatabasePool(config.db);
+app.use(createHealthRouter({ pool }));
 app.use(authenticateSession({ pool }));
 app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
 app.use('/auth', createAuthRouter({ pool }));

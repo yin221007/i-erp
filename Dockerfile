@@ -17,6 +17,7 @@ FROM nginx:stable-alpine
 
 # 从构建阶段复制编译产物到 Nginx 目录
 COPY --from=build-stage /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
 
 # 暴露端口
 EXPOSE 80

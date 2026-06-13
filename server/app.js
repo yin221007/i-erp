@@ -6,6 +6,7 @@ import {
 import { createAuthRouter } from './routes/auth.js';
 import { createAiRouter } from './routes/ai.js';
 import { createEmailRouter } from './routes/email.js';
+import { createHealthRouter } from './routes/health.js';
 import { createRecycleBinRouter } from './routes/recycle-bin.js';
 import { createResourceRouter } from './routes/resources.js';
 import { createUploadsRouter } from './routes/uploads.js';
@@ -19,9 +20,9 @@ export function createApp({ pool, config }) {
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy || 1);
   app.use(express.json({ limit: '2mb' }));
+  app.use(createHealthRouter({ pool }));
   app.use(authenticateSession({ pool }));
   app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
-  app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
   app.use('/auth', createAuthRouter({ pool }));
   if (config.deepseek) app.use(createAiRouter({ pool, deepseek: config.deepseek }));
   if (config.uploads) app.use(createUploadsRouter(config.uploads));

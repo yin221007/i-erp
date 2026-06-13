@@ -2,9 +2,9 @@ services:
   backend:
     image: "${IERP_BACKEND_IMAGE:-ierp-backend}:${IERP_VERSION:?Set immutable IERP_VERSION}"
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile.backend
-    container_name: "ierp-${IERP_COLOR:-blue}-backend"
+    container_name: ierp-green-backend
     restart: unless-stopped
     mem_limit: 1g
     cpus: 1.5
@@ -14,10 +14,10 @@ services:
     environment:
       NODE_ENV: production
       DB_HOST: "${DB_HOST:?Set DB_HOST}"
+      DB_PORT: "${DB_PORT:-3306}"
       DB_USER: "${DB_USER:?Set DB_USER}"
       DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
-      DB_NAME: "${DB_NAME:-ierp}"
-      DB_PORT: "${DB_PORT:-3306}"
+      DB_NAME: "${GREEN_DB_NAME:?Set GREEN_DB_NAME to a cloned database}"
       DB_CONNECTION_LIMIT: "${DB_CONNECTION_LIMIT:-10}"
       PORT: "3000"
       TRUST_PROXY: "1"
@@ -33,7 +33,7 @@ services:
       MAIL_MAX_MESSAGE_BYTES: "${MAIL_MAX_MESSAGE_BYTES:-10485760}"
       TZ: Asia/Shanghai
     volumes:
-      - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/app/uploads"
+      - "${GREEN_UPLOADS_PATH:?Set GREEN_UPLOADS_PATH to cloned uploads}:/app/uploads"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -50,16 +50,16 @@ services:
   frontend:
     image: "${IERP_FRONTEND_IMAGE:-ierp-frontend}:${IERP_VERSION:?Set immutable IERP_VERSION}"
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
-    container_name: "ierp-${IERP_COLOR:-blue}-frontend"
+    container_name: ierp-green-frontend
     restart: unless-stopped
     mem_limit: 256m
     cpus: 0.5
     security_opt:
       - no-new-privileges:true
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-10666}:80"
+      - "127.0.0.1:${GREEN_FRONTEND_PORT:-10667}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -72,38 +72,7 @@ services:
       retries: 12
       start_period: 10s
 
-  backup:
-    image: "${IERP_BACKUP_IMAGE:-ierp-backup}:${IERP_VERSION:?Set immutable IERP_VERSION}"
-    build:
-      context: .
-      dockerfile: Dockerfile.backup
-    profiles:
-      - backup
-    restart: "no"
-    mem_limit: 512m
-    cpus: 1
-    security_opt:
-      - no-new-privileges:true
-    environment:
-      DB_HOST: "${DB_HOST:?Set DB_HOST}"
-      DB_USER: "${DB_USER:?Set DB_USER}"
-      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
-      DB_NAME: "${DB_NAME:-ierp}"
-      DB_PORT: "${DB_PORT:-3306}"
-      BACKUP_ROOT: /backups
-      UPLOADS_ROOT: /data/uploads
-      DEPLOY_ROOT: /data/deploy
-      BACKUP_KIND: "${BACKUP_KIND:-daily}"
-      BACKUP_CAPACITY_BYTES: "536870912000"
-      MIN_FREE_BYTES: "${MIN_FREE_BYTES:-21474836480}"
-      MIN_FREE_PERCENT: "${MIN_FREE_PERCENT:-10}"
-      TZ: Asia/Shanghai
-    volumes:
-      - "${BACKUP_PATH:-/volume2/docker/ierp-backups}:/backups"
-      - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/data/uploads:ro"
-      - "${DEPLOY_PATH:-/volume2/docker/ierp}:/data/deploy:ro"
-
 networks:
   default:
-    name: "ierp-${IERP_COLOR:-blue}-net"
+    name: ierp-green-net
     driver: bridge
