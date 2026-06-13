@@ -126,6 +126,25 @@ async function createSystemSecretsTable(connection) {
   `);
 }
 
+async function createMaintenanceJobsTable(connection) {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_jobs (
+      id CHAR(36) NOT NULL,
+      requested_by VARCHAR(255) NOT NULL,
+      operation VARCHAR(16) NOT NULL,
+      backup_id VARCHAR(64) NULL,
+      status VARCHAR(32) NOT NULL,
+      phase VARCHAR(80) NOT NULL,
+      message VARCHAR(500) NOT NULL,
+      requested_at DATETIME(3) NOT NULL,
+      updated_at DATETIME(3) NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_maintenance_jobs_requested (requested_by, requested_at),
+      KEY idx_maintenance_jobs_status (status, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
 async function migrateUserPasswords(connection, { passwordHasher }) {
   const [rows] = await connection.query(
     'SELECT id, json_data FROM users ORDER BY id FOR UPDATE'
@@ -202,6 +221,11 @@ const MIGRATIONS = Object.freeze([
     version: '005_create_system_secrets',
     transactional: false,
     up: createSystemSecretsTable
+  },
+  {
+    version: '006_create_maintenance_jobs',
+    transactional: false,
+    up: createMaintenanceJobsTable
   }
 ]);
 

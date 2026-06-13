@@ -195,6 +195,15 @@ test('system secret storage is added through an idempotent additive migration', 
   await runMigrations(database);
   await runMigrations(database);
 
-  assert.equal(MIGRATION_VERSIONS.at(-1), '005_create_system_secrets');
   assert.equal(database.migrations.has('005_create_system_secrets'), true);
+});
+
+test('maintenance audit storage is added through an idempotent additive migration', async () => {
+  const database = new FakeMigrationDatabase();
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.equal(MIGRATION_VERSIONS.at(-1), '006_create_maintenance_jobs');
+  assert.equal(database.migrations.has('006_create_maintenance_jobs'), true);
 });

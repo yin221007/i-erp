@@ -49,6 +49,16 @@ async function createTestApp({
     }
   ];
   const jobs = [];
+  const auditQueries = [];
+  const pool = {
+    async query(sql, parameters) {
+      auditQueries.push({
+        sql: sql.replace(/\s+/g, ' ').trim(),
+        parameters
+      });
+      return [{ affectedRows: 1 }, []];
+    }
+  };
   const maintenanceQueue = {
     async enqueue(input) {
       const job = {
@@ -79,10 +89,11 @@ async function createTestApp({
   app.use(
     createBackupRouter({
       backupCatalog: { list: async () => backups },
-      maintenanceQueue
+      maintenanceQueue,
+      pool
     })
   );
-  return { app, jobs };
+  return { app, jobs, auditQueries };
 }
 
 test('backup management requires authentication and administrator access', async () => {
@@ -109,8 +120,36 @@ test('administrator can list sanitized backups and maintenance jobs', async () =
   assert.equal(JSON.stringify(jobs.body).includes('secret'), false);
 });
 
+test('job polling synchronizes final executor status into the audit table', async () => {
+  const status = {
+    id: '11111111-1111-4111-8111-111111111111',
+    operation: 'restore',
+    backupId: BACKUP_ID,
+    state: 'completed',
+    phase: 'complete',
+    message: 'Restore completed',
+    updatedAt: '2026-06-14T01:10:00.000Z'
+  };
+  const { app, auditQueries } = await createTestApp({
+    queueOverrides: {
+      async listStatuses() {
+        return [status];
+      }
+    }
+  });
+
+  await request(app).get('/backup/jobs').expect(200);
+
+  const update = auditQueries.find(query =>
+    query.sql.startsWith('UPDATE maintenance_jobs')
+  );
+  assert.ok(update);
+  assert.equal(update.parameters.includes('completed'), true);
+  assert.equal(JSON.stringify(update).includes('/volume2'), false);
+});
+
 test('manual backup requires the current administrator password', async () => {
-  const { app, jobs } = await createTestApp();
+  const { app, jobs, auditQueries } = await createTestApp();
 
   await request(app)
     .post('/backup/jobs')
@@ -130,6 +169,13 @@ test('manual backup requires the current administrator password', async () => {
     },
     { operation: 'backup', backupId: null, requestedBy: 'u-1' }
   );
+  assert.equal(
+    auditQueries.some(query =>
+      query.sql.startsWith('INSERT INTO maintenance_jobs')
+    ),
+    true
+  );
+  assert.equal(JSON.stringify(auditQueries).includes('current-password'), false);
 });
 
 test('restore requires exact backup confirmation and maintenance acknowledgement', async () => {

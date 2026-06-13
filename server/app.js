@@ -63,7 +63,7 @@ export function createApp({ pool, config, pushService = createPushService() }) {
         secret: config.maintenance.secret
       })
     : null;
-  app.use(createBackupRouter({ backupCatalog, maintenanceQueue }));
+  app.use(createBackupRouter({ backupCatalog, maintenanceQueue, pool }));
   app.use(createRecycleBinRouter({ pool }));
   app.use(createResourceRouter({
     pool,

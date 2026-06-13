@@ -61,9 +61,60 @@ function sendOperationError(res, error) {
   return res.status(500).json({ error: 'Maintenance operation failed' });
 }
 
+async function recordAcceptedJob(pool, job) {
+  if (!pool) return;
+  await pool.query(
+    `INSERT INTO maintenance_jobs (
+      id,
+      requested_by,
+      operation,
+      backup_id,
+      status,
+      phase,
+      message,
+      requested_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, 'pending', 'queued', 'Waiting for host executor', ?, ?)
+    ON DUPLICATE KEY UPDATE
+      status = VALUES(status),
+      phase = VALUES(phase),
+      message = VALUES(message),
+      updated_at = VALUES(updated_at)`,
+    [
+      job.id,
+      job.requestedBy,
+      job.operation,
+      job.backupId,
+      new Date(job.requestedAt),
+      new Date(job.requestedAt)
+    ]
+  );
+}
+
+async function synchronizeJobStatuses(pool, jobs) {
+  if (!pool) return;
+  await Promise.all(
+    jobs.map(job =>
+      pool.query(
+        `UPDATE maintenance_jobs
+        SET status = ?, phase = ?, message = ?, updated_at = ?
+        WHERE id = ?`,
+        [
+          job.state,
+          job.phase,
+          job.message,
+          new Date(job.updatedAt),
+          job.id
+        ]
+      )
+    )
+  );
+}
+
 export function createBackupRouter({
   backupCatalog = null,
   maintenanceQueue = null,
+  pool = null,
   failureLimiter = createFailureLimiter()
 } = {}) {
   const router = express.Router();
@@ -91,7 +142,9 @@ export function createBackupRouter({
     managementAvailable
       ? async (_req, res) => {
           try {
-            res.json({ jobs: await maintenanceQueue.listStatuses() });
+            const jobs = await maintenanceQueue.listStatuses();
+            await synchronizeJobStatuses(pool, jobs).catch(() => {});
+            res.json({ jobs });
           } catch {
             res.status(500).json({ error: 'Maintenance jobs are unavailable' });
           }
@@ -180,6 +233,7 @@ export function createBackupRouter({
               backupId: selectedBackup?.id || null,
               requestedBy: req.authUser.id
             });
+            await recordAcceptedJob(pool, job).catch(() => {});
             res.status(202).json({ job });
           } catch (error) {
             sendOperationError(res, error);
