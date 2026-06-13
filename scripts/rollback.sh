@@ -22,14 +22,9 @@ stop_green_stack() {
 quarantine_failed_database() {
   local quarantine_root="$1"
   mkdir -p "$quarantine_root"
-  if ! mariadb-dump \
-      "${DB_CLIENT_ARGS[@]}" \
+  if ! db_dump \
       --single-transaction \
       --quick \
-      --host="$DB_HOST" \
-      --port="${DB_PORT:-3306}" \
-      --user="$DB_USER" \
-      --password="$DB_PASSWORD" \
       "$DB_NAME" |
       gzip -1 > "$quarantine_root/failed-database.sql.gz"; then
     rm -f "$quarantine_root/failed-database.sql.gz"
@@ -41,20 +36,10 @@ restore_database() {
   [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] ||
     die "DB_NAME contains unsupported characters"
   log "Restoring database $DB_NAME from $(basename "$ROLLBACK_SNAPSHOT")"
-  mariadb \
-    "${DB_CLIENT_ARGS[@]}" \
-    --host="$DB_HOST" \
-    --port="${DB_PORT:-3306}" \
-    --user="$DB_USER" \
-    --password="$DB_PASSWORD" \
+  db_client \
     --execute="DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
   gzip -dc "$ROLLBACK_SNAPSHOT/database.sql.gz" |
-    mariadb \
-      "${DB_CLIENT_ARGS[@]}" \
-      --host="$DB_HOST" \
-      --port="${DB_PORT:-3306}" \
-      --user="$DB_USER" \
-      --password="$DB_PASSWORD" \
+    db_client \
       "$DB_NAME"
   compare_table_counts "$ROLLBACK_SNAPSHOT" "$DB_NAME"
 }
@@ -85,7 +70,7 @@ start_old_stack() {
 
 main() {
   require_env \
-    ROLLBACK_SNAPSHOT DB_HOST DB_USER DB_PASSWORD DB_NAME \
+    IERP_VERSION ROLLBACK_SNAPSHOT DB_HOST DB_USER DB_PASSWORD DB_NAME \
     UPLOADS_PATH OLD_COMPOSE_FILE BACKUP_ROOT
   verify_snapshot "$ROLLBACK_SNAPSHOT"
 
@@ -94,7 +79,7 @@ main() {
     return 0
   fi
 
-  require_command docker mariadb mariadb-dump gzip tar sha256sum find node
+  require_command docker gzip tar sha256sum find
   confirm_gate \
     ROLLBACK_CONFIRMATION \
     "restore-$(basename "$ROLLBACK_SNAPSHOT")" \

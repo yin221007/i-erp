@@ -26,6 +26,34 @@ require_command() {
   done
 }
 
+database_image() {
+  printf '%s:%s' \
+    "${IERP_BACKUP_IMAGE:-ierp-backup}" \
+    "${IERP_VERSION:?IERP_VERSION is required}"
+}
+
+db_client() {
+  docker run --rm --entrypoint mariadb \
+    "$(database_image)" \
+    "${DB_CLIENT_ARGS[@]}" \
+    --host="$DB_HOST" \
+    --port="${DB_PORT:-3306}" \
+    --user="$DB_USER" \
+    --password="$DB_PASSWORD" \
+    "$@"
+}
+
+db_dump() {
+  docker run --rm --entrypoint mariadb-dump \
+    "$(database_image)" \
+    "${DB_CLIENT_ARGS[@]}" \
+    --host="$DB_HOST" \
+    --port="${DB_PORT:-3306}" \
+    --user="$DB_USER" \
+    --password="$DB_PASSWORD" \
+    "$@"
+}
+
 verify_snapshot() {
   local snapshot_dir="$1"
   local required_file
@@ -97,14 +125,9 @@ wait_for_health() {
 database_count() {
   local database_name="$1"
   local table_name="$2"
-  mariadb \
-    "${DB_CLIENT_ARGS[@]}" \
+  db_client \
     --batch \
     --skip-column-names \
-    --host="$DB_HOST" \
-    --port="${DB_PORT:-3306}" \
-    --user="$DB_USER" \
-    --password="$DB_PASSWORD" \
     "$database_name" \
     --execute="SELECT COUNT(*) FROM \`$table_name\`"
 }
@@ -125,13 +148,17 @@ compare_table_counts() {
 }
 
 expected_upload_count() {
-  node -e "
-    const metadata = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+  local snapshot_dir="$1"
+  docker run --rm --entrypoint node \
+    --volume "$snapshot_dir:/snapshot:ro" \
+    "$(database_image)" \
+    -e "
+    const metadata = JSON.parse(require('fs').readFileSync('/snapshot/metadata.json', 'utf8'));
     if (!Number.isSafeInteger(metadata.uploadFileCount) || metadata.uploadFileCount < 0) {
       process.exit(65);
     }
     process.stdout.write(String(metadata.uploadFileCount));
-  " "$1/metadata.json"
+  "
 }
 
 compare_upload_count() {

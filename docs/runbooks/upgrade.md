@@ -37,6 +37,14 @@ Set `NAS_UID` and `NAS_GID` to the Synology deployment account values returned
 by `id -u` and `id -g`. Backups run with that identity so private snapshots
 remain readable by the deployment and restore scripts.
 
+Start the `backup-scheduler` profile after qualification. It runs once per
+local day after 02:30 by default, uses the same single-job lock and retention
+policy as manual backups, has a 512 MB memory limit, and never mounts the Docker
+socket.
+
+Deployment and rollback database checks run the MariaDB client from the
+versioned backup image because Synology does not provide host MariaDB binaries.
+
 ## Rehearsal
 
 1. Copy the latest complete backup to a cloned database and uploads directory.

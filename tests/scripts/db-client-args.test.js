@@ -47,10 +47,16 @@ test('all maintenance scripts pass the shared TLS arguments', async () => {
   for (const name of [
     'scripts/backup.sh',
     'scripts/restore-drill.sh',
-    'scripts/deploy-lib.sh',
-    'scripts/rollback.sh'
+    'scripts/deploy-lib.sh'
   ]) {
     const source = await readFile(new URL(name, root), 'utf8');
     assert.match(source, /DB_CLIENT_ARGS/);
   }
+
+  const rollback = await readFile(
+    new URL('scripts/rollback.sh', root),
+    'utf8'
+  );
+  assert.match(rollback, /source "\$SCRIPT_DIR\/deploy-lib\.sh"/);
+  assert.match(rollback, /db_(?:client|dump)/);
 });

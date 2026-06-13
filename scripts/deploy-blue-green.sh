@@ -25,6 +25,7 @@ final_snapshot=""
 
 build_candidate_images() {
   log "Building immutable candidate images: $IERP_VERSION"
+  docker compose -f "$BASE_COMPOSE_FILE" --profile backup build backup
   GREEN_DB_NAME="$GREEN_CLONE_DB_NAME" \
   GREEN_UPLOADS_PATH="$GREEN_CLONE_UPLOADS_PATH" \
     docker compose -f "$GREEN_COMPOSE_FILE" build
@@ -118,7 +119,7 @@ main() {
     DB_HOST DB_USER DB_PASSWORD DB_NAME \
     PUBLIC_ORIGINS SESSION_SECRET \
     UPLOADS_PATH BACKUP_ROOT OLD_COMPOSE_FILE
-  require_command docker curl mariadb sha256sum find node
+  require_command docker curl sha256sum find
 
   verify_restore_drill "$RESTORE_DRILL_SNAPSHOT"
   build_candidate_images

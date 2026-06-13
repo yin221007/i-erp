@@ -105,6 +105,44 @@ services:
       - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/data/uploads:ro"
       - "${DEPLOY_PATH:-/volume2/docker/ierp}:/data/deploy:ro"
 
+  backup-scheduler:
+    image: "${IERP_BACKUP_IMAGE:-ierp-backup}:${IERP_VERSION:?Set immutable IERP_VERSION}"
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    profiles:
+      - backup-scheduler
+    user: "${NAS_UID:?Set NAS_UID}:${NAS_GID:?Set NAS_GID}"
+    restart: unless-stopped
+    mem_limit: 512m
+    cpu_shares: 512
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - bash
+      - scripts/backup-scheduler.sh
+    environment:
+      DB_HOST: "${DB_HOST:?Set DB_HOST}"
+      DB_USER: "${DB_USER:?Set DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
+      DB_NAME: "${DB_NAME:-ierp}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_CLIENT_TLS: "${DB_CLIENT_TLS:-disabled}"
+      BACKUP_ROOT: /backups
+      UPLOADS_ROOT: /data/uploads
+      DEPLOY_ROOT: /data/deploy
+      BACKUP_CAPACITY_BYTES: "536870912000"
+      MIN_FREE_BYTES: "${MIN_FREE_BYTES:-21474836480}"
+      MIN_FREE_PERCENT: "${MIN_FREE_PERCENT:-10}"
+      BACKUP_SCHEDULE_HOUR: "${BACKUP_SCHEDULE_HOUR:-2}"
+      BACKUP_SCHEDULE_MINUTE: "${BACKUP_SCHEDULE_MINUTE:-30}"
+      BACKUP_POLL_SECONDS: "${BACKUP_POLL_SECONDS:-300}"
+      TZ: Asia/Shanghai
+    volumes:
+      - "${BACKUP_PATH:-/volume2/docker/ierp-backups}:/backups"
+      - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/data/uploads:ro"
+      - "${DEPLOY_PATH:-/volume2/docker/ierp}:/data/deploy:ro"
+
 networks:
   default:
     name: "ierp-${IERP_COLOR:-blue}-net"
