@@ -12,6 +12,7 @@ class FakeMigrationDatabase {
     this.production = new Map(
       production.map(record => [record.rowId, structuredClone(record.data)])
     );
+    this.aiModels = new Map();
     this.migrations = new Set();
     this.snapshot = null;
   }
@@ -24,6 +25,7 @@ class FakeMigrationDatabase {
     this.snapshot = {
       users: structuredClone(this.users),
       production: structuredClone(this.production),
+      aiModels: structuredClone(this.aiModels),
       migrations: structuredClone(this.migrations)
     };
   }
@@ -36,6 +38,7 @@ class FakeMigrationDatabase {
     if (!this.snapshot) return;
     this.users = this.snapshot.users;
     this.production = this.snapshot.production;
+    this.aiModels = this.snapshot.aiModels;
     this.migrations = this.snapshot.migrations;
     this.snapshot = null;
   }
@@ -79,6 +82,34 @@ class FakeMigrationDatabase {
 
     if (normalized.startsWith('INSERT INTO schema_migrations')) {
       this.migrations.add(parameters[0]);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized.startsWith('INSERT IGNORE INTO ai_models')) {
+      const [
+        id,
+        provider,
+        modelId,
+        displayName,
+        enabled,
+        reasoning,
+        contextLimit,
+        maxOutputTokens,
+        sortOrder
+      ] = parameters;
+      if (!this.aiModels.has(id)) {
+        this.aiModels.set(id, {
+          id,
+          provider,
+          modelId,
+          displayName,
+          enabled,
+          reasoning,
+          contextLimit,
+          maxOutputTokens,
+          sortOrder
+        });
+      }
       return [{ affectedRows: 1 }, []];
     }
 
@@ -140,4 +171,17 @@ test('duplicate production project IDs roll back and remain unmarked', async () 
   assert.equal(database.production.get('row-1').id, undefined);
   assert.equal(database.production.get('row-2').id, undefined);
   assert.equal(database.migrations.has('003_normalize_production_ids'), false);
+});
+
+test('AI model migration seeds current official models idempotently', async () => {
+  const database = new FakeMigrationDatabase();
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.deepEqual([...database.aiModels.keys()], [
+    'deepseek-v4-flash',
+    'deepseek-v4-pro'
+  ]);
+  assert.equal(database.migrations.has('004_create_ai_tables'), true);
 });

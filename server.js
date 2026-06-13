@@ -10,6 +10,7 @@ import {
   enforceOrigin
 } from './server/auth/middleware.js';
 import { createAuthRouter } from './server/routes/auth.js';
+import { createAiRouter } from './server/routes/ai.js';
 import { createEmailRouter } from './server/routes/email.js';
 import { createRecycleBinRouter } from './server/routes/recycle-bin.js';
 import { createResourceRouter } from './server/routes/resources.js';
@@ -29,6 +30,7 @@ const pool = createDatabasePool(config.db);
 app.use(authenticateSession({ pool }));
 app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
 app.use('/auth', createAuthRouter({ pool }));
+app.use(createAiRouter({ pool, deepseek: config.deepseek }));
 app.use(createUploadsRouter(config.uploads));
 const RESOURCES = ['projects', 'clients', 'equipment', 'schedule', 'docs', 'archives', 'production', 'users', 'settings', 'payments', 'approvals', 'worklogs', 'messages', 'channels', 'email_configs', 'announcements', 'ai_messages', 'recycle_bin'];
 

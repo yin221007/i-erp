@@ -4,6 +4,7 @@ import {
   enforceOrigin
 } from './auth/middleware.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createAiRouter } from './routes/ai.js';
 import { createEmailRouter } from './routes/email.js';
 import { createRecycleBinRouter } from './routes/recycle-bin.js';
 import { createResourceRouter } from './routes/resources.js';
@@ -22,6 +23,7 @@ export function createApp({ pool, config }) {
   app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
   app.use('/auth', createAuthRouter({ pool }));
+  if (config.deepseek) app.use(createAiRouter({ pool, deepseek: config.deepseek }));
   if (config.uploads) app.use(createUploadsRouter(config.uploads));
   if (config.mail) {
     app.use(createEmailRouter({

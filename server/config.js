@@ -66,7 +66,8 @@ export function loadConfig(environment = process.env) {
       )
     },
     deepseek: {
-      apiKey: environment.DEEPSEEK_API_KEY?.trim() || ''
+      apiKey: environment.DEEPSEEK_API_KEY?.trim() || '',
+      baseUrl: 'https://api.deepseek.com'
     },
     uploads: {
       directory: environment.UPLOAD_DIR?.trim() || '/app/uploads',

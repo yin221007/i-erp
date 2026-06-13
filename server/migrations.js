@@ -33,6 +33,86 @@ async function createSecurityTables(connection) {
   `);
 }
 
+async function createAiTables(connection) {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS ai_models (
+      id VARCHAR(64) NOT NULL,
+      provider VARCHAR(32) NOT NULL,
+      model_id VARCHAR(128) NOT NULL,
+      display_name VARCHAR(100) NOT NULL,
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      reasoning TINYINT(1) NOT NULL DEFAULT 0,
+      context_limit INT UNSIGNED NOT NULL,
+      max_output_tokens INT UNSIGNED NOT NULL,
+      sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+      created_at DATETIME(3) NOT NULL,
+      updated_at DATETIME(3) NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_ai_models_provider_model (provider, model_id),
+      KEY idx_ai_models_enabled_sort (enabled, sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      id CHAR(36) NOT NULL,
+      user_id VARCHAR(255) NOT NULL,
+      model_id VARCHAR(64) NOT NULL,
+      prompt_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+      completion_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+      status VARCHAR(32) NOT NULL,
+      error_code VARCHAR(64) NULL,
+      started_at DATETIME(3) NOT NULL,
+      completed_at DATETIME(3) NULL,
+      PRIMARY KEY (id),
+      KEY idx_ai_usage_user_started (user_id, started_at),
+      KEY idx_ai_usage_model_started (model_id, started_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const defaultModels = [
+    [
+      'deepseek-v4-flash',
+      'deepseek',
+      'deepseek-v4-flash',
+      'DeepSeek V4 Flash',
+      1,
+      1,
+      1_000_000,
+      384_000,
+      10
+    ],
+    [
+      'deepseek-v4-pro',
+      'deepseek',
+      'deepseek-v4-pro',
+      'DeepSeek V4 Pro',
+      1,
+      1,
+      1_000_000,
+      384_000,
+      20
+    ]
+  ];
+  for (const model of defaultModels) {
+    await connection.query(
+      `INSERT IGNORE INTO ai_models (
+        id,
+        provider,
+        model_id,
+        display_name,
+        enabled,
+        reasoning,
+        context_limit,
+        max_output_tokens,
+        sort_order,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))`,
+      model
+    );
+  }
+}
+
 async function migrateUserPasswords(connection, { passwordHasher }) {
   const [rows] = await connection.query(
     'SELECT id, json_data FROM users ORDER BY id FOR UPDATE'
@@ -99,6 +179,11 @@ const MIGRATIONS = Object.freeze([
     version: '003_normalize_production_ids',
     transactional: true,
     up: normalizeProductionIds
+  },
+  {
+    version: '004_create_ai_tables',
+    transactional: false,
+    up: createAiTables
   }
 ]);
 
