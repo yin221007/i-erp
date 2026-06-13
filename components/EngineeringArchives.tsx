@@ -16,8 +16,8 @@ interface EngineeringArchivesProps {
 type SortField = 'none' | 'project' | 'category' | 'date';
 type SortDirection = 'asc' | 'desc';
 
-const getDownloadUrl = (url: string) =>
-  `${url}${url.includes('?') ? '&' : '?'}download=1`;
+const getDownloadUrl = (url?: string) =>
+  url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '#';
 
 const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, projects, onAddArchive, onDeleteArchive, onUpdateArchive, currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');

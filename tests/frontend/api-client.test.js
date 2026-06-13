@@ -81,3 +81,14 @@ test('user presence uses the self-service heartbeat instead of writing users', a
     /syncToBackend\('users',\s*'PUT',\s*currentU,\s*currentU\.id\)/
   );
 });
+
+test('system settings manages DeepSeek through the dedicated secret API', async () => {
+  const source = await readFile(systemSettingsUrl, 'utf8');
+
+  assert.match(source, /\/ai\/settings/);
+  assert.match(source, /method:\s*'PUT'/);
+  assert.match(source, /method:\s*'DELETE'/);
+  assert.match(source, /type="password"/);
+  assert.match(source, /DeepSeek/);
+  assert.doesNotMatch(source, /localSettings[^;\n]*apiKey/);
+});
