@@ -172,15 +172,17 @@ export function createAuthRouter({ pool, loginLimiter = createLoginLimiter() }) 
 
   router.post('/heartbeat', requireAuth, async (req, res, next) => {
     try {
+      const lastActive = new Date().toISOString();
       const updatedUser = {
         ...req.authUser,
-        lastActive: new Date().toISOString()
+        lastActive
       };
       const [result] = await pool.query(
         `UPDATE users
-        SET json_data = ?, updated_at = CURRENT_TIMESTAMP
+        SET json_data = JSON_SET(json_data, '$.lastActive', ?),
+          updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`,
-        [JSON.stringify(updatedUser), req.authUser.id]
+        [lastActive, req.authUser.id]
       );
       if (result.affectedRows !== 1) {
         return res.status(404).json({ error: 'User not found' });

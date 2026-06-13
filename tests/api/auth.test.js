@@ -8,6 +8,7 @@ class FakeAuthPool {
   constructor(users) {
     this.users = new Map(users.map(user => [user.id, structuredClone(user)]));
     this.sessions = new Map();
+    this.heartbeatUpdates = 0;
   }
 
   async query(sql, parameters = []) {
@@ -85,6 +86,17 @@ class FakeAuthPool {
       );
       if (session) session.revokedAt = revokedAt;
       return [{ affectedRows: session ? 1 : 0 }, []];
+    }
+
+    if (normalized.startsWith('UPDATE users SET json_data = JSON_SET')) {
+      const [lastActive, userId] = parameters;
+      if (!this.users.has(userId)) return [{ affectedRows: 0 }, []];
+      this.users.set(userId, {
+        ...this.users.get(userId),
+        lastActive
+      });
+      this.heartbeatUpdates += 1;
+      return [{ affectedRows: 1 }, []];
     }
 
     if (normalized.startsWith('UPDATE users SET json_data')) {
@@ -279,4 +291,5 @@ test('a normal user heartbeat updates only their own last-active timestamp', asy
   assert.equal(Number.isNaN(Date.parse(response.body.user.lastActive)), false);
   assert.equal(pool.users.get('u-2').lastActive, response.body.user.lastActive);
   assert.equal(pool.users.get('u-1').lastActive, undefined);
+  assert.equal(pool.heartbeatUpdates, 1);
 });
