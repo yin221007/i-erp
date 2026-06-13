@@ -4,6 +4,7 @@ import {
   enforceOrigin
 } from './auth/middleware.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createResourceRouter } from './routes/resources.js';
 
 export function createApp({ pool, config }) {
   if (!pool) throw new Error('pool is required');
@@ -17,5 +18,6 @@ export function createApp({ pool, config }) {
   app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
   app.use('/auth', createAuthRouter({ pool }));
+  app.use(createResourceRouter({ pool }));
   return app;
 }

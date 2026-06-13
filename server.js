@@ -18,6 +18,7 @@ import {
   enforceOrigin
 } from './server/auth/middleware.js';
 import { createAuthRouter } from './server/routes/auth.js';
+import { createResourceRouter } from './server/routes/resources.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -354,84 +355,7 @@ app.post('/upload', (req, res) => {
   });
 });
 
-app.get('/:resource', async (req, res) => {
-  const { resource } = req.params;
-  if (!RESOURCES.includes(resource)) return res.status(404).json({});
-  try {
-    const [rows] = await pool.query(`SELECT json_data FROM \`${resource}\``);
-    let data = rows.map(row => safeParseJSON(row.json_data)).filter(item => item !== null);
-    res.json(data);
-  } catch (err) { res.json([]); }
-});
-
-app.put('/:resource/:id', async (req, res) => {
-    const { resource, id } = req.params;
-    const updatedItem = req.body;
-    
-    if (resource === 'users' && updatedItem) {
-        updatedItem.lastActive = new Date().toISOString();
-    }
-
-    try {
-        const query = `REPLACE INTO \`${resource}\` (id, json_data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`;
-        await pool.query(query, [id, JSON.stringify(updatedItem)]);
-
-        if (resource === 'approvals' && updatedItem.status !== 'Draft') {
-            const applicantId = updatedItem.applicantId;
-            const [userRows] = await pool.query('SELECT json_data FROM users WHERE id = ?', [applicantId]);
-            if (userRows.length > 0) {
-                const applicant = safeParseJSON(userRows[0].json_data);
-                if (updatedItem.status === 'Approved' || updatedItem.status === 'Rejected' || updatedItem.status === 'Returned') {
-                    const statusText = updatedItem.status === 'Approved' ? '已核准 ✅' : updatedItem.status === 'Rejected' ? '已驳回 ❌' : '被退回补充资料 ⚠️';
-                    sendPushNotification(applicant.preferences, `审批结果通知：${updatedItem.title}`, `您提交的审批单【${updatedItem.title}】当前状态更新为：${statusText}。`);
-                }
-            }
-        }
-
-        res.json(updatedItem);
-    } catch(err) { 
-        console.error(`[API Error] PUT ${resource}/${id}:`, err);
-        res.status(500).json({ error: "服务器同步指令执行异常" }); 
-    }
-});
-
-app.delete('/:resource/:id', async (req, res) => {
-    const { resource, id } = req.params;
-    try {
-        const [targetRows] = await pool.query(`SELECT json_data FROM \`${resource}\` WHERE id = ?`, [id]);
-        if (targetRows.length > 0) {
-            const itemData = safeParseJSON(targetRows[0].json_data);
-            const recycleItem = { id: Math.random().toString(36).substr(2, 9), originalId: id, resourceType: resource, name: itemData.name || itemData.title || '未知', deletedAt: new Date().toISOString(), deletedBy: req.userNickname || 'System', data: itemData };
-            await pool.query(`INSERT INTO recycle_bin (id, json_data) VALUES (?, ?)`, [recycleItem.id, JSON.stringify(recycleItem)]);
-            await pool.query(`DELETE FROM \`${resource}\` WHERE id = ?`, [id]);
-        }
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/:resource', async (req, res) => {
-    const { resource } = req.params;
-    const newItem = req.body;
-    try {
-        const query = `REPLACE INTO \`${resource}\` (id, json_data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`;
-        await pool.query(query, [newItem.id, JSON.stringify(newItem)]);
-
-        if (resource === 'approvals' && newItem.status === 'Pending') {
-            const approverIds = newItem.approverIds || [];
-            for (const approverId of approverIds) {
-                const [userRows] = await pool.query('SELECT json_data FROM users WHERE id = ?', [approverId]);
-                if (userRows.length > 0) {
-                    const approver = safeParseJSON(userRows[0].json_data);
-                    sendPushNotification(approver.preferences, `新审批待办：${newItem.title}`, `收到来自 ${newItem.applicantName} (${newItem.department}) 的新申请。请进入 ERP 系统处理。`);
-                }
-            }
-        }
-
-        res.status(201).json(newItem);
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
-    }
-});
+app.use(createResourceRouter({ pool }));
 
 initDB()
   .then(() => {

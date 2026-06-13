@@ -40,3 +40,43 @@ initialization rather than relying on a preceding `cd`.
 - **Notes**: Initialized the repository in the correct working directory.
 
 ---
+
+## [ERR-20260613-002] shell-pattern-quoting
+
+**Logged**: 2026-06-13T14:30:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+A static-search command used a double-quoted pattern containing a backtick,
+which zsh parsed as command substitution.
+
+### Error
+
+```text
+zsh:1: unmatched "
+```
+
+### Context
+
+- The command was read-only.
+- Tests and builds were running independently and were unaffected.
+
+### Suggested Fix
+
+Avoid backticks in double-quoted shell patterns or split the search into simpler
+regular expressions.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `server.js`, `server/`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T14:30:00+08:00
+- **Notes**: Re-ran the search with a simpler pattern; it completed cleanly.
+
+---
