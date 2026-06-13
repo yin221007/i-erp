@@ -1,5 +1,5 @@
 # 切换到 alpine 基础镜像以避开 Debian 仓库过期问题
-FROM node:20-alpine
+FROM node:20.19-alpine
 
 WORKDIR /app
 
@@ -11,11 +11,8 @@ RUN apk add --no-cache \
     gcc \
     libc-dev
 
-# 复制依赖定义
-COPY package*.json ./
-
-# 安装生产环境依赖
-RUN npm install --production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # 复制服务端代码
 COPY server.js ./

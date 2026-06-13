@@ -22,29 +22,19 @@ import {
   NotificationType, ScheduleItem, PaymentRecord, Approval, WorkLogEntry, 
   ChatMessage, ChatChannel, TaskStatus, NotificationCategory, UserPreferences, ChatAnnouncement, RecycleBinItem 
 } from './types';
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, {
+  lazy,
+  Suspense,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef
+} from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import ProjectList from './components/ProjectList';
-import ProjectWorkflow from './components/ProjectWorkflow';
-import ClientManager from './components/ClientManager';
-import EquipmentLibrary from './components/EquipmentLibrary';
-import DailySchedule from './components/DailySchedule';
-import Documentation from './components/Documentation';
-import EngineeringArchives from './components/EngineeringArchives';
-import ProductionProgress from './components/ProductionProgress';
-import UserManager from './components/UserManager';
-import SystemSettings from './components/SystemSettings';
-import PaymentDashboard from './components/PaymentDashboard';
-import ApprovalManager from './components/ApprovalManager'; 
-import WorkLogManager from './components/WorkLogManager'; 
-import TeamChat from './components/TeamChat';
-import EmailClient from './components/EmailClient'; 
 import NotificationToast from './components/NotificationToast';
 import Login from './components/Login';
-import UserPreferencesModal from './components/UserPreferencesModal';
-import AICenter from './components/AICenter';
-import RecycleBin from './components/RecycleBin';
 import { normalizeProductionRecord } from './lib/production-records.js';
 import {
   API_URL,
@@ -52,6 +42,31 @@ import {
   apiJson,
   setUnauthorizedHandler
 } from './lib/api';
+
+const ProjectList = lazy(() => import('./components/ProjectList'));
+const ProjectWorkflow = lazy(() => import('./components/ProjectWorkflow'));
+const ClientManager = lazy(() => import('./components/ClientManager'));
+const EquipmentLibrary = lazy(() => import('./components/EquipmentLibrary'));
+const DailySchedule = lazy(() => import('./components/DailySchedule'));
+const Documentation = lazy(() => import('./components/Documentation'));
+const EngineeringArchives = lazy(
+  () => import('./components/EngineeringArchives')
+);
+const ProductionProgress = lazy(
+  () => import('./components/ProductionProgress')
+);
+const UserManager = lazy(() => import('./components/UserManager'));
+const SystemSettings = lazy(() => import('./components/SystemSettings'));
+const PaymentDashboard = lazy(() => import('./components/PaymentDashboard'));
+const ApprovalManager = lazy(() => import('./components/ApprovalManager'));
+const WorkLogManager = lazy(() => import('./components/WorkLogManager'));
+const TeamChat = lazy(() => import('./components/TeamChat'));
+const EmailClient = lazy(() => import('./components/EmailClient'));
+const UserPreferencesModal = lazy(
+  () => import('./components/UserPreferencesModal')
+);
+const AICenter = lazy(() => import('./components/AICenter'));
+const RecycleBin = lazy(() => import('./components/RecycleBin'));
 
 function App() {
   // ==================================================================================
@@ -1148,6 +1163,7 @@ function App() {
             userPrefs={userPrefs} 
         />
         <main className={`flex-1 overflow-y-auto ${activeView === 'chat' ? 'p-0' : 'p-4 md:p-8'}`}>
+          <Suspense fallback={<div className="p-8 text-sm font-black text-slate-400">正在加载模块...</div>}>
             {activeView === 'projects' && (selectedProject ? 
                 <ProjectWorkflow project={selectedProject} nodes={selectedProject.nodes} onUpdateNode={handleUpdateWorkflowNode} onUpdateProject={handleUpdateProject} onBack={() => setSelectedProject(null)} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} archives={archives.filter(a => a.projectId === selectedProject.id)} currentUser={currentUser} users={users}/> :
                 <ProjectList projects={projects} users={users} clients={clients} onSelectProject={setSelectedProject} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onAddProject={handleAddProject} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} currentUser={currentUser} onAddApproval={handleAddApproval}/>
@@ -1167,10 +1183,13 @@ function App() {
             {activeView === 'ai_center' && <AICenter currentUser={currentUser} messages={aiMessages.filter(m => m.userId === currentUser.id)} onSendMessage={handleSendAiMessage} onDeleteMessage={handleDeleteAiMessage} onClearHistory={handleClearAiHistory} />}
             {activeView === 'users' && <UserManager users={users} currentUser={currentUser} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} />}
             {activeView === 'recycle_bin' && <RecycleBin items={recycleBin} currentUser={currentUser} onRestore={handleRestoreRecycleItem} onPermanentDelete={handlePermanentDeleteRecycleItem} onEmpty={handleEmptyRecycleBin} />}
+          </Suspense>
         </main>
       </div>
-      <SystemSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={appSettings} onSave={handleSaveSettings} />
-      <UserPreferencesModal isOpen={isUserPrefsOpen} onClose={() => setIsUserPrefsOpen(false)} preferences={userPrefs} onSave={handleSaveUserPrefs} />
+      <Suspense fallback={null}>
+        <SystemSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={appSettings} onSave={handleSaveSettings} />
+        <UserPreferencesModal isOpen={isUserPrefsOpen} onClose={() => setIsUserPrefsOpen(false)} preferences={userPrefs} onSave={handleSaveUserPrefs} />
+      </Suspense>
     </div>
   );
 }

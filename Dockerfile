@@ -1,13 +1,10 @@
 # Stage 1: Build
-FROM node:20-alpine as build-stage
+FROM node:20.19-alpine AS build-stage
 
 WORKDIR /app
 
-# 复制依赖定义
-COPY package*.json ./
-
-# 安装依赖
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # 复制所有源代码
 COPY . .
