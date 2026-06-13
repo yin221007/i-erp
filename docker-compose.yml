@@ -31,9 +31,14 @@ services:
       MAIL_ALLOWED_IMAP_ENDPOINTS: "${MAIL_ALLOWED_IMAP_ENDPOINTS:-imap.qq.com:993,hwimap.exmail.qq.com:993}"
       MAIL_ALLOWED_SMTP_ENDPOINTS: "${MAIL_ALLOWED_SMTP_ENDPOINTS:-smtp.qq.com:465,hwsmtp.exmail.qq.com:465}"
       MAIL_MAX_MESSAGE_BYTES: "${MAIL_MAX_MESSAGE_BYTES:-10485760}"
+      BACKUP_ROOT: /app/backups
+      MAINTENANCE_QUEUE_ROOT: /app/maintenance-queue
+      MAINTENANCE_JOB_SECRET: "${MAINTENANCE_JOB_SECRET:?Set MAINTENANCE_JOB_SECRET}"
       TZ: Asia/Shanghai
     volumes:
       - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/app/uploads"
+      - "${BACKUP_PATH:-/volume2/docker/ierp-backups}:/app/backups:ro"
+      - "${MAINTENANCE_QUEUE_PATH:?Set MAINTENANCE_QUEUE_PATH}:/app/maintenance-queue"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

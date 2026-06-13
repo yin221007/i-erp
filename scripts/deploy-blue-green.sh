@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/deploy-lib.sh"
 
 GREEN_COMPOSE_FILE="${GREEN_COMPOSE_FILE:-$PROJECT_ROOT/deploy/docker-compose.green.yml}"
 BASE_COMPOSE_FILE="${BASE_COMPOSE_FILE:-$PROJECT_ROOT/docker-compose.yml}"
+MAINTENANCE_COMPOSE_FILE="${MAINTENANCE_COMPOSE_FILE:-$PROJECT_ROOT/deploy/docker-compose.maintenance.yml}"
 GREEN_FRONTEND_PORT="${GREEN_FRONTEND_PORT:-10667}"
 AUTO_ROLLBACK="${AUTO_ROLLBACK:-1}"
 old_stopped=0
@@ -26,8 +27,11 @@ final_snapshot=""
 build_candidate_images() {
   log "Building immutable candidate images: $IERP_VERSION"
   docker compose -f "$BASE_COMPOSE_FILE" --profile backup build backup
+  docker compose -f "$MAINTENANCE_COMPOSE_FILE" build maintenance
   GREEN_DB_NAME="$GREEN_CLONE_DB_NAME" \
   GREEN_UPLOADS_PATH="$GREEN_CLONE_UPLOADS_PATH" \
+  GREEN_MAINTENANCE_QUEUE_PATH="$GREEN_CLONE_MAINTENANCE_QUEUE_PATH" \
+  BACKUP_PATH="$BACKUP_ROOT" \
     docker compose -f "$GREEN_COMPOSE_FILE" build
 }
 
@@ -35,6 +39,8 @@ start_clone_candidate() {
   log "Starting green candidate against cloned data"
   GREEN_DB_NAME="$GREEN_CLONE_DB_NAME" \
   GREEN_UPLOADS_PATH="$GREEN_CLONE_UPLOADS_PATH" \
+  GREEN_MAINTENANCE_QUEUE_PATH="$GREEN_CLONE_MAINTENANCE_QUEUE_PATH" \
+  BACKUP_PATH="$BACKUP_ROOT" \
     docker compose -f "$GREEN_COMPOSE_FILE" up -d --force-recreate
   wait_for_health "http://127.0.0.1:$GREEN_FRONTEND_PORT/health/ready"
   compare_table_counts "$RESTORE_DRILL_SNAPSHOT" "$GREEN_CLONE_DB_NAME"
@@ -65,6 +71,8 @@ start_production_candidate() {
   production_migration_started=1
   GREEN_DB_NAME="$DB_NAME" \
   GREEN_UPLOADS_PATH="$UPLOADS_PATH" \
+  GREEN_MAINTENANCE_QUEUE_PATH="$MAINTENANCE_QUEUE_PATH" \
+  BACKUP_PATH="$BACKUP_ROOT" \
     docker compose -f "$GREEN_COMPOSE_FILE" up -d --force-recreate
   wait_for_health "http://127.0.0.1:$GREEN_FRONTEND_PORT/health/ready"
   compare_table_counts "$final_snapshot" "$DB_NAME"
@@ -104,10 +112,12 @@ check_inputs() {
     IERP_VERSION \
     RESTORE_DRILL_SNAPSHOT \
     GREEN_CLONE_DB_NAME \
-    GREEN_CLONE_UPLOADS_PATH
+    GREEN_CLONE_UPLOADS_PATH \
+    GREEN_CLONE_MAINTENANCE_QUEUE_PATH
   verify_restore_drill "$RESTORE_DRILL_SNAPSHOT"
   [[ -d "$GREEN_CLONE_UPLOADS_PATH" ]] ||
     die "Green clone uploads path does not exist"
+  mkdir -p "$GREEN_CLONE_MAINTENANCE_QUEUE_PATH"
 }
 
 main() {
@@ -119,8 +129,8 @@ main() {
 
   require_env \
     DB_HOST DB_USER DB_PASSWORD DB_NAME \
-    PUBLIC_ORIGINS SESSION_SECRET \
-    UPLOADS_PATH BACKUP_ROOT OLD_COMPOSE_FILE
+    PUBLIC_ORIGINS SESSION_SECRET MAINTENANCE_JOB_SECRET \
+    UPLOADS_PATH BACKUP_ROOT MAINTENANCE_QUEUE_PATH OLD_COMPOSE_FILE
   require_command docker curl sha256sum find
 
   verify_restore_drill "$RESTORE_DRILL_SNAPSHOT"

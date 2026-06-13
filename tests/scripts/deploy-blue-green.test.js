@@ -64,6 +64,27 @@ test('restore drill records a manifest-bound success marker', async () => {
   assert.match(source, /status=success/);
 });
 
+test('deployment isolates clone jobs and wires production to the supervised queue', async () => {
+  const source = await readFile(deployUrl, 'utf8');
+
+  assert.match(source, /GREEN_CLONE_MAINTENANCE_QUEUE_PATH/);
+  assert.match(
+    source,
+    /GREEN_MAINTENANCE_QUEUE_PATH="\$GREEN_CLONE_MAINTENANCE_QUEUE_PATH"[\s\S]*start_clone_candidate/
+  );
+  assert.match(
+    source,
+    /GREEN_MAINTENANCE_QUEUE_PATH="\$MAINTENANCE_QUEUE_PATH"[\s\S]*start_production_candidate/
+  );
+});
+
+test('deployment builds the immutable maintenance response image', async () => {
+  const source = await readFile(deployUrl, 'utf8');
+
+  assert.match(source, /docker-compose\.maintenance\.yml/);
+  assert.match(source, /build maintenance/);
+});
+
 test('deployment scripts are valid Bash syntax', () => {
   for (const url of [deployUrl, rollbackUrl]) {
     const result = spawnSync('/bin/bash', ['-n', url.pathname], {

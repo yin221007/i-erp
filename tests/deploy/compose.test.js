@@ -108,3 +108,72 @@ test('the base stack contains no production host literals and bounds backups', a
     /BACKUP_ID/
   );
 });
+
+test('backend reads backups through a read-only mount and writes only to its queue', async () => {
+  const source = await readFile(new URL('docker-compose.yml', root), 'utf8');
+  const stack = parse(source);
+  const backend = stack.services.backend;
+
+  assert.equal(environmentValue(backend, 'BACKUP_ROOT'), '/app/backups');
+  assert.equal(
+    environmentValue(backend, 'MAINTENANCE_QUEUE_ROOT'),
+    '/app/maintenance-queue'
+  );
+  assert.match(
+    environmentValue(backend, 'MAINTENANCE_JOB_SECRET'),
+    /MAINTENANCE_JOB_SECRET:\?/
+  );
+  assert.ok(backend.volumes.some(volume => /:\/app\/backups:ro$/.test(volume)));
+  assert.ok(
+    backend.volumes.some(volume => /:\/app\/maintenance-queue$/.test(volume))
+  );
+  assert.equal(
+    backend.volumes.some(volume => volume.includes('/var/run/docker.sock')),
+    false
+  );
+});
+
+test('blue and green candidate backends receive isolated maintenance queues', async () => {
+  const [blue, green] = await Promise.all([
+    compose('docker-compose.blue.yml'),
+    compose('docker-compose.green.yml')
+  ]);
+
+  assert.match(
+    blue.services.backend.volumes.join('\n'),
+    /BLUE_MAINTENANCE_QUEUE_PATH/
+  );
+  assert.match(
+    green.services.backend.volumes.join('\n'),
+    /GREEN_MAINTENANCE_QUEUE_PATH/
+  );
+  for (const stack of [blue, green]) {
+    assert.equal(
+      environmentValue(stack.services.backend, 'BACKUP_ROOT'),
+      '/app/backups'
+    );
+    assert.equal(
+      environmentValue(stack.services.backend, 'MAINTENANCE_QUEUE_ROOT'),
+      '/app/maintenance-queue'
+    );
+  }
+});
+
+test('maintenance response binds only the local production frontend port', async () => {
+  const source = await readFile(
+    new URL('deploy/docker-compose.maintenance.yml', root),
+    'utf8'
+  );
+  const stack = parse(source);
+  const maintenance = stack.services.maintenance;
+  const nginx = await readFile(
+    new URL('deploy/maintenance/nginx.conf', root),
+    'utf8'
+  );
+
+  assert.match(publishedPort(maintenance), /^127\.0\.0\.1:/);
+  assert.match(publishedPort(maintenance), /FRONTEND_PORT/);
+  assert.ok(maintenance.mem_limit);
+  assert.match(nginx, /Retry-After/);
+  assert.match(nginx, /return 503/);
+});

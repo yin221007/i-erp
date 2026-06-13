@@ -69,6 +69,32 @@ test('executor writes status atomically and never exposes the signing secret', a
   assert.doesNotMatch(source, /set -x/);
 });
 
+test('maintenance replaces the frontend in a fixed port-safe order', async () => {
+  const restore = await readFile(
+    new URL('../../scripts/maintenance-restore.sh', import.meta.url),
+    'utf8'
+  );
+  const startFunction = restore.slice(
+    restore.indexOf('start_maintenance_response()'),
+    restore.indexOf('create_pre_restore_backup()')
+  );
+  const resumeFunction = restore.slice(
+    restore.indexOf('resume_public_application()'),
+    restore.indexOf('automatic_rollback()')
+  );
+
+  assert.ok(startFunction.indexOf('app_compose stop frontend') >= 0);
+  assert.ok(
+    startFunction.indexOf('maintenance_compose up -d') >
+      startFunction.indexOf('app_compose stop frontend')
+  );
+  assert.ok(resumeFunction.indexOf('stop_maintenance_response') >= 0);
+  assert.ok(
+    resumeFunction.indexOf('up -d frontend') >
+      resumeFunction.indexOf('stop_maintenance_response')
+  );
+});
+
 test('executor scripts are valid Bash syntax', () => {
   const result = spawnSync('/bin/bash', ['-n', executorUrl.pathname], {
     encoding: 'utf8'

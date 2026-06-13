@@ -38,10 +38,16 @@ if command -v docker >/dev/null 2>&1; then
   : "${DB_PASSWORD:?Set DB_PASSWORD for Compose validation}"
   : "${PUBLIC_ORIGINS:?Set PUBLIC_ORIGINS for Compose validation}"
   : "${SESSION_SECRET:?Set SESSION_SECRET for Compose validation}"
+  : "${MAINTENANCE_JOB_SECRET:?Set MAINTENANCE_JOB_SECRET for Compose validation}"
+  : "${MAINTENANCE_QUEUE_PATH:?Set MAINTENANCE_QUEUE_PATH for Compose validation}"
+  : "${BLUE_MAINTENANCE_QUEUE_PATH:?Set BLUE_MAINTENANCE_QUEUE_PATH for Compose validation}"
+  : "${GREEN_MAINTENANCE_QUEUE_PATH:?Set GREEN_MAINTENANCE_QUEUE_PATH for Compose validation}"
   : "${GREEN_DB_NAME:?Set GREEN_DB_NAME to a clone for Compose validation}"
   : "${GREEN_UPLOADS_PATH:?Set GREEN_UPLOADS_PATH to cloned uploads}"
+  docker compose -f docker-compose.yml config >/dev/null
   docker compose -f deploy/docker-compose.blue.yml config >/dev/null
   docker compose -f deploy/docker-compose.green.yml config >/dev/null
+  docker compose -f deploy/docker-compose.maintenance.yml config >/dev/null
 elif [[ "${QUALIFICATION_MODE:-local}" == "nas" ]]; then
   printf 'docker compose is required in QUALIFICATION_MODE=nas\n' >&2
   exit 69
