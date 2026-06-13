@@ -13,6 +13,8 @@ import { createRecycleBinRouter } from './routes/recycle-bin.js';
 import { createResourceRouter } from './routes/resources.js';
 import { createUploadsRouter } from './routes/uploads.js';
 import { createMailService } from './services/mail.js';
+import { createBackupCatalog } from './services/backup-catalog.js';
+import { createMaintenanceQueue } from './services/maintenance-jobs.js';
 import { createNotificationDispatcher } from './services/notification-events.js';
 import { createPushService } from './services/push.js';
 
@@ -52,7 +54,16 @@ export function createApp({ pool, config, pushService = createPushService() }) {
     }));
   }
   app.use(createPushRouter({ pushService }));
-  app.use(createBackupRouter());
+  const backupCatalog = config.maintenance
+    ? createBackupCatalog({ backupRoot: config.maintenance.backupRoot })
+    : null;
+  const maintenanceQueue = config.maintenance
+    ? createMaintenanceQueue({
+        queueRoot: config.maintenance.queueRoot,
+        secret: config.maintenance.secret
+      })
+    : null;
+  app.use(createBackupRouter({ backupCatalog, maintenanceQueue }));
   app.use(createRecycleBinRouter({ pool }));
   app.use(createResourceRouter({
     pool,

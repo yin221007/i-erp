@@ -9,7 +9,10 @@ const validEnvironment = {
   DB_PASSWORD: 'secret',
   DB_NAME: 'ierp',
   SESSION_SECRET: 'a'.repeat(32),
-  PUBLIC_ORIGINS: 'https://erp.example.test'
+  PUBLIC_ORIGINS: 'https://erp.example.test',
+  BACKUP_ROOT: '/app/backups',
+  MAINTENANCE_QUEUE_ROOT: '/app/maintenance-queue',
+  MAINTENANCE_JOB_SECRET: 'b'.repeat(32)
 };
 
 test('configuration rejects a missing database password', () => {
@@ -42,4 +45,27 @@ test('public origins are normalized into an allowlist', () => {
     'https://erp.example.test',
     'https://erp-backup.example.test'
   ]);
+});
+
+test('maintenance paths and signing secret are required', () => {
+  for (const name of [
+    'BACKUP_ROOT',
+    'MAINTENANCE_QUEUE_ROOT',
+    'MAINTENANCE_JOB_SECRET'
+  ]) {
+    const environment = { ...validEnvironment };
+    delete environment[name];
+    assert.throws(() => loadConfig(environment), new RegExp(name));
+  }
+});
+
+test('maintenance signing secret must contain at least 32 characters', () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        ...validEnvironment,
+        MAINTENANCE_JOB_SECRET: 'too-short'
+      }),
+    /MAINTENANCE_JOB_SECRET/
+  );
 });

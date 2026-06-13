@@ -226,3 +226,62 @@ test('status reads return sanitized data and reject malformed status files', asy
   );
   await assert.rejects(() => queue.getStatus(NONCE), /invalid status/i);
 });
+
+test('status listing returns valid jobs newest first without private fields', async () => {
+  const queueRoot = await createQueueRoot();
+  const queue = createMaintenanceQueue({
+    queueRoot,
+    secret: SECRET,
+    now: () => NOW
+  });
+  await mkdir(path.join(queueRoot, 'status'), { recursive: true });
+  for (const [id, updatedAt] of [
+    [JOB_ID, '2026-06-14T00:59:00.000Z'],
+    [NONCE, '2026-06-14T01:00:00.000Z']
+  ]) {
+    await writeFile(
+      path.join(queueRoot, 'status', `${id}.json`),
+      JSON.stringify({
+        id,
+        operation: 'backup',
+        backupId: null,
+        state: 'completed',
+        phase: 'complete',
+        message: '完成',
+        updatedAt,
+        signature: 'private'
+      })
+    );
+  }
+
+  const statuses = await queue.listStatuses();
+
+  assert.deepEqual(statuses.map(status => status.id), [NONCE, JOB_ID]);
+  assert.equal(JSON.stringify(statuses).includes('private'), false);
+});
+
+test('status listing includes signed pending jobs before the executor starts', async () => {
+  const queueRoot = await createQueueRoot();
+  const queue = createMaintenanceQueue({
+    queueRoot,
+    secret: SECRET,
+    now: () => NOW,
+    randomUUID: (() => {
+      const values = [JOB_ID, NONCE];
+      return () => values.shift();
+    })()
+  });
+  await queue.enqueue({ operation: 'backup', requestedBy: 'u-1' });
+
+  assert.deepEqual(await queue.listStatuses(), [
+    {
+      id: JOB_ID,
+      operation: 'backup',
+      backupId: null,
+      state: 'pending',
+      phase: 'queued',
+      message: '等待宿主机执行',
+      updatedAt: NOW.toISOString()
+    }
+  ]);
+});

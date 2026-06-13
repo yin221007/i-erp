@@ -315,6 +315,59 @@ export function createMaintenanceQueue({
       }
       const value = JSON.parse(await readFile(filePath, 'utf8'));
       return sanitizeStatus(value, id);
+    },
+
+    async listStatuses() {
+      const entries = await regularJsonFiles(directories.status);
+      const statuses = [];
+      for (const entry of entries) {
+        const id = entry.name.slice(0, -5);
+        try {
+          statuses.push(await this.getStatus(id));
+        } catch {
+          // Ignore malformed status files; the executor retains them for audit.
+        }
+      }
+
+      const statusIds = new Set(statuses.map(status => status.id));
+      for (const [state, directory] of [
+        ['pending', directories.pending],
+        ['running', directories.running]
+      ]) {
+        for (const entry of await regularJsonFiles(directory)) {
+          const id = entry.name.slice(0, -5);
+          if (statusIds.has(id)) continue;
+          try {
+            const job = JSON.parse(
+              await readFile(path.join(directory, entry.name), 'utf8')
+            );
+            if (
+              !verifyMaintenanceJob(job, secret, {
+                now: new Date(job.requestedAt)
+              })
+            ) {
+              continue;
+            }
+            statuses.push({
+              id: job.id,
+              operation: job.operation,
+              backupId: job.backupId,
+              state,
+              phase: state === 'pending' ? 'queued' : 'starting',
+              message:
+                state === 'pending' ? '等待宿主机执行' : '宿主机已接收任务',
+              updatedAt: new Date(job.requestedAt).toISOString()
+            });
+          } catch {
+            // Invalid queue files are never exposed through the API.
+          }
+        }
+      }
+
+      return statuses.sort(
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+      );
     }
   };
 }

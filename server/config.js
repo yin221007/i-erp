@@ -4,6 +4,14 @@ function required(environment, name) {
   return value;
 }
 
+function absolutePath(environment, name) {
+  const value = required(environment, name);
+  if (!value.startsWith('/')) {
+    throw new Error(`${name} must be an absolute path`);
+  }
+  return value;
+}
+
 function positiveInteger(value, name, fallback) {
   const parsed = Number(value ?? fallback);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -47,6 +55,15 @@ export function loadConfig(environment = process.env) {
     .map(value => value.trim())
     .filter(Boolean)
     .map(normalizeOrigin);
+  const maintenanceJobSecret = required(
+    environment,
+    'MAINTENANCE_JOB_SECRET'
+  );
+  if (maintenanceJobSecret.length < 32) {
+    throw new Error(
+      'MAINTENANCE_JOB_SECRET must contain at least 32 characters'
+    );
+  }
 
   return {
     environment: environment.NODE_ENV || 'development',
@@ -87,6 +104,11 @@ export function loadConfig(environment = process.env) {
         'UPLOAD_MAX_BYTES',
         100 * 1024 * 1024
       )
+    },
+    maintenance: {
+      backupRoot: absolutePath(environment, 'BACKUP_ROOT'),
+      queueRoot: absolutePath(environment, 'MAINTENANCE_QUEUE_ROOT'),
+      secret: maintenanceJobSecret
     },
     mail: {
       allowedImapHosts: endpointAllowlist(
