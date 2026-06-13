@@ -105,10 +105,11 @@ manual retention count is used so repeated UI requests cannot exhaust storage.
    lock.
 4. Executor verifies the selected snapshot manifest.
 5. Executor runs an isolated restore drill against a temporary database.
-6. Executor creates and verifies a new `pre-restore` snapshot of the current
-   production database and uploads.
-7. Executor enables a maintenance response and stops the iERP frontend,
-   backend, and backup scheduler.
+6. Executor enables a maintenance response and stops the public frontend,
+   preventing new writes while in-flight backend requests drain.
+7. Executor creates and verifies a new `pre-restore` snapshot of the current
+   production database and uploads, then stops the backend and backup
+   scheduler.
 8. Executor restores the selected database and uploads using staging paths and
    atomic promotion.
 9. Executor starts the same deployed application version and waits for backend

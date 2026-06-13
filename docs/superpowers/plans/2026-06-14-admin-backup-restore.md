@@ -258,8 +258,8 @@ Assert:
 - No `eval`, arbitrary shell input, user paths, or user container names.
 - Atomic pending-to-running claim.
 - Fixed iERP release, database, uploads, backup, and container configuration.
-- Restore ordering: verify snapshot, restore drill, pre-restore backup,
-  maintenance response, stop app, restore database, restore uploads, start app,
+- Restore ordering: verify snapshot, restore drill, maintenance response,
+  pre-restore backup, stop app, restore database, restore uploads, start app,
   compare counts, remove maintenance.
 - Trap-driven rollback after every destructive phase.
 - Status phases are atomically persisted.
