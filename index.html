@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>i ERP - 厨房设备工程管理系统</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="manifest" href="/manifest.json">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          slate: {
+            850: '#1e293b', 
+            900: '#0f172a',
+            950: '#020617',
+          },
+          primary: {
+            50: 'var(--color-primary-50)',
+            100: 'var(--color-primary-100)',
+            200: 'var(--color-primary-200)',
+            300: 'var(--color-primary-300)',
+            400: 'var(--color-primary-400)',
+            500: 'var(--color-primary-500)',
+            600: 'var(--color-primary-600)',
+            700: 'var(--color-primary-700)',
+            800: 'var(--color-primary-800)',
+            900: 'var(--color-primary-900)',
+            950: 'var(--color-primary-950)',
+          }
+        },
+        animation: {
+          'led-flow': 'led-rotate 4s linear infinite',
+        }
+      }
+    }
+  }
+</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+
+:root {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+  --color-primary-950: #172554;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 统一滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.4);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* LED 动画定义 */
+@keyframes led-rotate {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
+}
+
+/* 主题颜色定义 - 绑定在 body 上以确保全局作用域（包括 Portals） */
+body[data-theme="blue"] {
+  --color-primary-50: #eff6ff; --color-primary-100: #dbeafe; --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd; --color-primary-400: #60a5fa; --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb; --color-primary-700: #1d4ed8; --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a; --color-primary-950: #172554;
+}
+body[data-theme="emerald"] {
+  --color-primary-50: #ecfdf5; --color-primary-100: #d1fae5; --color-primary-200: #a7f3d0;
+  --color-primary-300: #6ee7b7; --color-primary-400: #34d399; --color-primary-500: #10b981;
+  --color-primary-600: #059669; --color-primary-700: #047857; --color-primary-800: #065f46;
+  --color-primary-900: #064e3b; --color-primary-950: #022c22;
+}
+body[data-theme="violet"] {
+  --color-primary-50: #f5f3ff; --color-primary-100: #ede9fe; --color-primary-200: #ddd6fe;
+  --color-primary-300: #c4b5fd; --color-primary-400: #a78bfa; --color-primary-500: #8b5cf6;
+  --color-primary-600: #7c3aed; --color-primary-700: #6d28d9; --color-primary-800: #5b21b6;
+  --color-primary-900: #4c1d95; --color-primary-950: #2e1065;
+}
+body[data-theme="amber"] {
+  --color-primary-50: #fffbeb; --color-primary-100: #fef3c7; --color-primary-200: #fde68a;
+  --color-primary-300: #fcd34d; --color-primary-400: #fbbf24; --color-primary-500: #f59e0b;
+  --color-primary-600: #d97706; --color-primary-700: #b45309; --color-primary-800: #92400e;
+  --color-primary-900: #78350f; --color-primary-950: #451a03;
+}
+body[data-theme="rose"] {
+  --color-primary-50: #fff1f2; --color-primary-100: #ffe4e6; --color-primary-200: #fecdd3;
+  --color-primary-300: #fda4af; --color-primary-400: #fb7185; --color-primary-500: #f43f5e;
+  --color-primary-600: #e11d48; --color-primary-700: #be123c; --color-primary-800: #9f1239;
+  --color-primary-900: #881337; --color-primary-950: #4c0519;
+}
+body[data-theme="cyan"] {
+  --color-primary-50: #ecfeff; --color-primary-100: #cffafe; --color-primary-200: #a5f3fc;
+  --color-primary-300: #67e8f9; --color-primary-400: #22d3ee; --color-primary-500: #06b6d4;
+  --color-primary-600: #0891b2; --color-primary-700: #0e7490; --color-primary-800: #155e75;
+  --color-primary-900: #164e63; --color-primary-950: #083344;
+}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "recharts": "https://esm.sh/recharts@2.12.0?external=react,react-dom",
+    "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react,react-dom",
+    "lunar-javascript": "https://esm.sh/lunar-javascript@1.6.12",
+    "@google/genai": "https://esm.sh/@google/genai@1.34.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "path": "https://esm.sh/path@^0.12.7",
+    "fs": "https://esm.sh/fs@^0.0.1-security",
+    "express": "https://esm.sh/express@^5.2.1",
+    "url": "https://esm.sh/url@^0.11.4",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "crypto": "https://esm.sh/crypto@^1.0.1",
+    "multer": "https://esm.sh/multer@^2.0.2",
+    "cors": "https://esm.sh/cors@^2.8.5",
+    "mysql2/": "https://esm.sh/mysql2@^3.16.0/",
+    "imap-simple": "https://esm.sh/imap-simple@^5.1.0",
+    "mailparser": "https://esm.sh/mailparser@^3.9.1",
+    "body-parser": "https://esm.sh/body-parser@^2.2.1",
+    "nodemailer": "https://esm.sh/nodemailer@^7.0.12"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-slate-200 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-300 overscroll-none" data-theme="blue">
+<div id="root"></div>
+<script type="module" src="./index.tsx"></script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

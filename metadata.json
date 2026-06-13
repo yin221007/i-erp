@@ -1,0 +1,8 @@
+{
+  "name": "ERP -24.99",
+  "description": "8版，优化数据",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

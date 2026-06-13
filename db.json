@@ -1,0 +1,393 @@
+{
+  "projects": [
+    {
+      "id": "p-1",
+      "name": "滨江万象城 2期 厨房工程",
+      "code": "PJ-2023-088",
+      "clientName": "滨江万象城餐饮管理有限公司",
+      "manager": "李明",
+      "startDate": "2023-11-01",
+      "deadline": "2024-02-15",
+      "status": "Active",
+      "progress": 35,
+      "nodes": [
+        {
+          "id": "node-1",
+          "title": "和甲方去监管局审图",
+          "description": "Review drawings with the client at the Regulatory Bureau.",
+          "phase": "前期对接 & 设计",
+          "status": "COMPLETED",
+          "attachments": [],
+          "memos": [{ "id": "m-1", "content": "图纸初审已通过，需修改燃气管道走向。", "createdAt": "2023-11-02T10:00:00.000Z", "author": "Admin" }],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-2",
+          "title": "确定图纸清单",
+          "description": "Finalize and confirm the drawing list.",
+          "phase": "前期对接 & 设计",
+          "status": "COMPLETED",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-3",
+          "title": "和甲方对接确认时间需求",
+          "description": "Confirm project timeline requirements with the client.",
+          "phase": "前期对接 & 设计",
+          "status": "IN_PROGRESS",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-4",
+          "title": "发现问题和设计沟通",
+          "description": "Identify issues and communicate design adjustments.",
+          "phase": "前期对接 & 设计",
+          "status": "IN_PROGRESS",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-5",
+          "title": "生产采购对接会",
+          "description": "Internal meeting for production and procurement handover.",
+          "phase": "生产准备",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-6",
+          "title": "和外协对接带去现场下生产单",
+          "description": "Coordinate with external partners regarding on-site production orders.",
+          "phase": "生产准备",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-7",
+          "title": "工程例会提出注意事项",
+          "description": "Raise issues and precautions during the engineering meeting.",
+          "phase": "生产准备",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-8",
+          "title": "和施工对接建立联系",
+          "description": "Establish contact/coordination with the construction team.",
+          "phase": "生产准备",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-9",
+          "title": "确定可生产设备下生产单",
+          "description": "Confirm manufacturable equipment and issue production orders.",
+          "phase": "生产准备",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-10",
+          "title": "进入工地施工环节",
+          "description": "Official start of on-site construction phase.",
+          "phase": "进场施工",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-11",
+          "title": "土建水电施工配合",
+          "description": "Coordination with civil engineering, water, and electricity teams.",
+          "phase": "进场施工",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-12",
+          "title": "排油烟管道施工先行",
+          "description": "Prioritize construction of exhaust/ventilation ducts.",
+          "phase": "进场施工",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-13",
+          "title": "完工尺寸复核待定下单生产",
+          "description": "Re-verify final dimensions before ordering pending production items.",
+          "phase": "进场施工",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-14",
+          "title": "厨房设备进场安装",
+          "description": "Kitchen equipment entry and installation.",
+          "phase": "安装调试",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-15",
+          "title": "工程量报验",
+          "description": "Submission and verification of engineering quantities.",
+          "phase": "安装调试",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-16",
+          "title": "设备进场材料报验",
+          "description": "Inspection of incoming equipment and materials.",
+          "phase": "安装调试",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-17",
+          "title": "设备调试培训",
+          "description": "Equipment commissioning and user training.",
+          "phase": "验收交付",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-18",
+          "title": "设备签收验收",
+          "description": "Final equipment sign-off and acceptance.",
+          "phase": "验收交付",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        },
+        {
+          "id": "node-19",
+          "title": "准备竣工材料",
+          "description": "Preparation of project completion materials/documentation.",
+          "phase": "结算收尾",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-20",
+          "title": "内部结算",
+          "description": "Internal cost settlement.",
+          "phase": "结算收尾",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-21",
+          "title": "决算审计材料",
+          "description": "Prepare materials for final settlement audit.",
+          "phase": "结算收尾",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": []
+        },
+        {
+          "id": "node-22",
+          "title": "开票申请支付",
+          "description": "Invoice application and payment processing.",
+          "phase": "结算收尾",
+          "status": "PENDING",
+          "attachments": [],
+          "memos": [],
+          "isKeyNode": true
+        }
+      ]
+    },
+    {
+      "id": "p-2",
+      "name": "凯悦酒店宴会厅改造",
+      "code": "PJ-2023-092",
+      "clientName": "凯悦大酒店",
+      "manager": "张志强",
+      "startDate": "2023-12-10",
+      "deadline": "2024-03-01",
+      "status": "Pending",
+      "progress": 10,
+      "nodes": []
+    },
+    {
+      "id": "p-3",
+      "name": "华为研发中心员工食堂",
+      "code": "PJ-2023-105",
+      "clientName": "华为行政部",
+      "manager": "王芳",
+      "startDate": "2023-10-15",
+      "deadline": "2024-01-20",
+      "status": "Active",
+      "progress": 65,
+      "nodes": []
+    }
+  ],
+  "clients": [
+    {
+      "id": "c-1",
+      "companyName": "滨江万象城餐饮管理有限公司",
+      "address": "杭州市滨江区钱江路888号",
+      "type": "Restaurant",
+      "createdAt": "2023-10-15T10:00:00Z",
+      "contacts": [
+        { "id": "ct-1", "name": "张总", "role": "总经理", "phone": "13800138000", "email": "zhang@example.com" },
+        { "id": "ct-2", "name": "李工", "role": "工程部经理", "phone": "13900139000", "email": "li@example.com" }
+      ]
+    },
+    {
+      "id": "c-2",
+      "companyName": "凯悦大酒店",
+      "address": "上海市浦东新区世纪大道1号",
+      "type": "Hotel",
+      "createdAt": "2023-11-01T09:30:00Z",
+      "contacts": [
+        { "id": "ct-3", "name": "王厨师长", "role": "行政总厨", "phone": "13600136000", "email": "chef.wang@hyatt-mock.com" }
+      ]
+    }
+  ],
+  "equipment": [
+    {
+      "id": "eq-1",
+      "name": "双头单尾小炒炉",
+      "model": "XC-2-1",
+      "brand": "金强",
+      "category": "热厨设备",
+      "dimensions": "1800x1100x800/1200",
+      "powerSpecs": "380V/550W (风机)",
+      "waterGasSpecs": "DN40 燃气管, DN15 给水",
+      "description": "静音灶头，全不锈钢材质，带熄火保护。"
+    },
+    {
+      "id": "eq-2",
+      "name": "立式四门雪柜 (冷冻/冷藏)",
+      "model": "REF-4",
+      "brand": "星星",
+      "category": "制冷设备",
+      "dimensions": "1220x760x1950",
+      "powerSpecs": "220V/650W",
+      "description": "双温控制，上冷冻下冷藏，铜管蒸发器。"
+    },
+    {
+      "id": "eq-3",
+      "name": "洗碗机 (通道式)",
+      "model": "DW-2000",
+      "brand": "霍巴特",
+      "category": "洗涤消毒",
+      "dimensions": "2200x800x1500",
+      "powerSpecs": "380V/28kW",
+      "waterGasSpecs": "DN20 进水, DN50 排水",
+      "description": "每小时洗涤200筐，高温消毒，自带烘干模块。"
+    }
+  ],
+  "schedule": [
+    { "id": "s-1", "title": "万象城项目现场勘测", "date": "2023-12-05", "time": "10:00", "type": "SiteVisit", "projectId": "p-1", "isCompleted": false },
+    { "id": "s-2", "title": "部门周例会", "date": "2023-12-04", "time": "09:00", "type": "Meeting", "isCompleted": true },
+    { "id": "s-3", "title": "凯悦酒店图纸审核截止", "date": "2023-12-06", "time": "17:00", "type": "Deadline", "projectId": "p-2", "isCompleted": false }
+  ],
+  "docs": [
+    { "id": "d-1", "title": "商用厨房设计规范 GB-2023", "category": "Regulation", "fileType": "PDF", "size": "4.2 MB", "updatedAt": "2023-09-01", "url": "" },
+    { "id": "d-2", "title": "燃气管道施工安全手册", "category": "Manual", "fileType": "PDF", "size": "2.8 MB", "updatedAt": "2023-06-15", "url": "" },
+    { "id": "d-3", "title": "工程验收单模板_V2.0", "category": "Template", "fileType": "XLSX", "size": "120 KB", "updatedAt": "2023-11-20", "url": "" },
+    { "id": "d-4", "title": "排烟风量计算公式表", "category": "Standard", "fileType": "DOCX", "size": "45 KB", "updatedAt": "2023-10-05", "url": "" }
+  ],
+  "archives": [
+    { "id": "ar-1", "title": "万象城二期_厨房平面布置图_V3.dwg", "category": "Drawing", "projectName": "滨江万象城 2期 厨房工程", "fileType": "DWG", "size": "15.4 MB", "uploadDate": "2023-11-10", "uploader": "李工", "url": "" },
+    { "id": "ar-2", "title": "万象城二期_水电点位图_V2.pdf", "category": "Drawing", "projectName": "滨江万象城 2期 厨房工程", "fileType": "PDF", "size": "8.2 MB", "uploadDate": "2023-11-12", "uploader": "李工", "url": "" },
+    { "id": "ar-3", "title": "凯悦酒店改造工程施工合同-盖章版", "category": "Contract", "projectName": "凯悦酒店宴会厅改造", "fileType": "PDF", "size": "5.5 MB", "uploadDate": "2023-12-01", "uploader": "王经理", "url": "" },
+    { "id": "ar-4", "title": "华为食堂设备采购清单_最终版", "category": "List", "projectName": "华为研发中心员工食堂", "fileType": "XLSX", "size": "245 KB", "uploadDate": "2023-10-20", "uploader": "张采购", "url": "" },
+    { "id": "ar-5", "title": "预付款发票_FP20231105001", "category": "Invoice", "projectName": "滨江万象城 2期 厨房工程", "fileType": "JPG", "size": "1.2 MB", "uploadDate": "2023-11-15", "uploader": "财务部", "url": "" },
+    { "id": "ar-6", "title": "工程联系单_关于排烟管道变更_001", "category": "ContactForm", "projectName": "华为研发中心员工食堂", "fileType": "PDF", "size": "450 KB", "uploadDate": "2023-11-05", "uploader": "李工", "url": "" }
+  ],
+  "production": [
+    {
+      "projectId": "p-1",
+      "projectName": "滨江万象城 2期 厨房工程",
+      "projectCode": "PJ-2023-088",
+      "items": [
+        { "id": "pr-1", "name": "双头大锅灶", "model": "DZ-2000", "quantity": 4, "status": "Waiting", "notes": "等待板材到货" },
+        { "id": "pr-2", "name": "三层工作台", "model": "WT-1500", "quantity": 12, "status": "InStock", "batchDate": "2023-12-01" },
+        { "id": "pr-3", "name": "排烟罩", "model": "HOOD-3000", "quantity": 2, "status": "Waiting", "notes": "需核对现场风管尺寸" }
+      ]
+    },
+    {
+      "projectId": "p-3",
+      "projectName": "华为研发中心员工食堂",
+      "projectCode": "PJ-2023-105",
+      "items": [
+        { "id": "pr-4", "name": "万能蒸烤箱", "model": "OVEN-10", "quantity": 2, "status": "Shipped", "batchDate": "2023-11-28" },
+        { "id": "pr-5", "name": "洗碗机", "model": "DW-PRO", "quantity": 1, "status": "Shipped", "batchDate": "2023-11-28" },
+        { "id": "pr-6", "name": "不锈钢货架", "model": "SHELF-1200", "quantity": 20, "status": "InStock", "batchDate": "2023-11-25" },
+        { "id": "pr-7", "name": "定制异形水池", "model": "SINK-CUSTOM", "quantity": 5, "status": "Waiting", "notes": "图纸待确认" }
+      ]
+    }
+  ],
+  "users": [
+    { 
+      "id": "u-1", 
+      "nickname": "admin", 
+      "password": "password",
+      "department": "总经办", 
+      "role": "Admin", 
+      "isDefaultAdmin": true,
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
+    },
+    { 
+      "id": "u-2", 
+      "nickname": "李明", 
+      "password": "123",
+      "department": "工程部", 
+      "role": "User", 
+      "permission": "ReadWrite",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka"
+    },
+    { 
+      "id": "u-3", 
+      "nickname": "王芳", 
+      "password": "123",
+      "department": "采购部", 
+      "role": "User", 
+      "permission": "Read",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Zack"
+    },
+    { 
+      "id": "u-4", 
+      "nickname": "张志强", 
+      "password": "123",
+      "department": "工程部", 
+      "role": "User", 
+      "permission": "ReadWrite",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Bob"
+    }
+  ],
+  "settings": [
+    {
+      "id": 1,
+      "appName": "i ERP",
+      "logoUrl": "",
+      "logoWidth": 40
+    }
+  ]
+}

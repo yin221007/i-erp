@@ -1,0 +1,1200 @@
+import { 
+  INITIAL_PROJECTS, 
+  INITIAL_CLIENTS, 
+  INITIAL_EQUIPMENT, 
+  INITIAL_DOCS, 
+  INITIAL_SCHEDULE,
+  INITIAL_ARCHIVES,
+  INITIAL_PRODUCTION,
+  INITIAL_USERS,
+  INITIAL_SETTINGS,
+  INITIAL_USER_PREFS, 
+  INITIAL_PAYMENTS, 
+  INITIAL_MESSAGES,
+  INITIAL_CHANNELS,
+  INITIAL_WORKFLOW,
+  RESTRICTED_MODULES,
+  ALLOWED_DEPARTMENTS_FOR_CORE
+} from './constants';
+import { 
+  Project, Client, Equipment, Contact, ArchiveItem, ProjectProduction, User, 
+  WorkflowNode, AppSettings, DocItem, Notification as AppNotification, 
+  NotificationType, ScheduleItem, PaymentRecord, Approval, WorkLogEntry, 
+  ChatMessage, ChatChannel, TaskStatus, NotificationCategory, UserPreferences, ChatAnnouncement, RecycleBinItem 
+} from './types';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import Header from './components/Header';
+import Sidebar from './components/Sidebar';
+import ProjectList from './components/ProjectList';
+import ProjectWorkflow from './components/ProjectWorkflow';
+import ClientManager from './components/ClientManager';
+import EquipmentLibrary from './components/EquipmentLibrary';
+import DailySchedule from './components/DailySchedule';
+import Documentation from './components/Documentation';
+import EngineeringArchives from './components/EngineeringArchives';
+import ProductionProgress from './components/ProductionProgress';
+import UserManager from './components/UserManager';
+import SystemSettings from './components/SystemSettings';
+import PaymentDashboard from './components/PaymentDashboard';
+import ApprovalManager from './components/ApprovalManager'; 
+import WorkLogManager from './components/WorkLogManager'; 
+import TeamChat from './components/TeamChat';
+import EmailClient from './components/EmailClient'; 
+import NotificationToast from './components/NotificationToast';
+import Login from './components/Login';
+import UserPreferencesModal from './components/UserPreferencesModal';
+import AICenter from './components/AICenter';
+import RecycleBin from './components/RecycleBin';
+
+const API_URL = (window as any)._env_?.API_URL || '/api';
+
+function App() {
+  // ==================================================================================
+  // 1. UI STATE MANAGEMENT
+  // ==================================================================================
+  const [activeView, setActiveView] = useState<string>('projects');
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false); 
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'offline' | 'connecting'>('connecting');
+  
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+      return (localStorage.getItem('ierp_theme') as 'light' | 'dark') || 'light';
+  });
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isUserPrefsOpen, setIsUserPrefsOpen] = useState<boolean>(false); 
+
+  // ==================================================================================
+  // 2. DATA STATE MANAGEMENT
+  // ==================================================================================
+  const [users, setUsers] = useState<User[]>(() => {
+      const saved = localStorage.getItem('ierp_users');
+      if (saved) {
+          try { return JSON.parse(saved); } catch(e) {}
+      }
+      return INITIAL_USERS;
+  });
+  const [projects, setProjects] = useState<Project[]>(() => {
+      const saved = localStorage.getItem('ierp_projects');
+      if (saved) {
+          try { return JSON.parse(saved); } catch(e) {}
+      }
+      return INITIAL_PROJECTS;
+  });
+  
+  const [clients, setClients] = useState<Client[]>(() => {
+      const saved = localStorage.getItem('ierp_clients');
+      return saved ? JSON.parse(saved) : [];
+  });
+  const [equipment, setEquipment] = useState<Equipment[]>(() => {
+      const saved = localStorage.getItem('ierp_equipment');
+      return saved ? JSON.parse(saved) : [];
+  });
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+  const [docs, setDocs] = useState<DocItem[]>([]);
+  const [archives, setArchives] = useState<ArchiveItem[]>([]);
+  const [productionData, setProductionData] = useState<ProjectProduction[]>([]);
+  const [paymentRecords, setPaymentRecords] = useState<PaymentRecord[]>([]);
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [workLogs, setWorkLogs] = useState<WorkLogEntry[]>([]);
+  const [recycleBin, setRecycleBin] = useState<RecycleBinItem[]>([]);
+  
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [channels, setChannels] = useState<ChatChannel[]>([]);
+  const [announcements, setAnnouncements] = useState<ChatAnnouncement[]>([]);
+  const [activeChannelId, setActiveChannelId] = useState<string>(''); 
+  const [chatLastReadMap, setChatLastReadMap] = useState<Record<string, string>>({});
+
+  const [aiMessages, setAiMessages] = useState<any[]>([]);
+  const [sessionAnnouncementsRead, setSessionAnnouncementsRead] = useState<boolean>(false);
+
+  const [appSettings, setAppSettings] = useState<AppSettings>(() => {
+      const saved = localStorage.getItem('ierp_settings');
+      if (saved) {
+        try { return JSON.parse(saved); } catch(e) {}
+      }
+      return INITIAL_SETTINGS;
+  });
+
+  const [userPrefs, setUserPrefs] = useState<UserPreferences>(() => {
+      const savedUserId = localStorage.getItem('ierp_current_user_id');
+      if (savedUserId) {
+          const cached = localStorage.getItem(`ierp_prefs_${savedUserId}`);
+          if (cached) {
+              try { return { ...INITIAL_USER_PREFS, ...JSON.parse(cached) }; } catch(e) {}
+          }
+      }
+      return INITIAL_USER_PREFS;
+  }); 
+
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const lastNotificationRef = useRef<{ id: string, time: number }>({ id: '', time: 0 });
+  const lastNotifiedMessageIdRef = useRef<string>('');
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+      return !!localStorage.getItem('ierp_current_user_id');
+  });
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+      const savedUserId = localStorage.getItem('ierp_current_user_id');
+      const savedUsers = localStorage.getItem('ierp_users');
+      if (savedUserId && savedUsers) {
+          try {
+              const uList = JSON.parse(savedUsers);
+              const found = uList.find((u: any) => u.id === savedUserId);
+              if (found) return found;
+          } catch(e) {}
+      }
+      return INITIAL_USERS[0];
+  }); 
+  
+  const stateRef = useRef({ currentUser, activeView, activeChannelId });
+  useEffect(() => {
+    stateRef.current = { currentUser, activeView, activeChannelId };
+  }, [currentUser, activeView, activeChannelId]);
+
+  // ==================================================================================
+  // 3. EFFECTS & INITIALIZATION
+  // ==================================================================================
+
+  useEffect(() => {
+      if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+      } else {
+          document.documentElement.classList.remove('dark');
+      }
+      localStorage.setItem('ierp_theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+      document.body.setAttribute('data-theme', userPrefs.themeColor || 'blue');
+      
+      let baseSize = '16px';
+      switch (userPrefs.fontSize) {
+          case 'small': baseSize = '14px'; break;
+          case 'medium': baseSize = '16px'; break;
+          case 'large': baseSize = '18px'; break;
+          case 'xlarge': baseSize = '20px'; break;
+          default: baseSize = '16px';
+      }
+      document.documentElement.style.fontSize = baseSize;
+  }, [userPrefs.themeColor, userPrefs.fontSize]);
+
+  useEffect(() => {
+      const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+      if (link) {
+          link.href = appSettings.logoUrl || '/icon.png';
+      } else {
+          const newLink = document.createElement('link');
+          newLink.rel = 'icon';
+          newLink.href = appSettings.logoUrl || '/icon.png';
+          document.head.appendChild(newLink);
+      }
+  }, [appSettings.logoUrl, appSettings.appName]);
+
+  useEffect(() => {
+      if (!isAuthenticated || connectionStatus !== 'connected') return;
+      const interval = setInterval(() => {
+          pollUpdates();
+      }, 5000); 
+      return () => clearInterval(interval);
+  }, [isAuthenticated, connectionStatus]);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  useEffect(() => {
+      if (isAuthenticated && activeView === 'chat' && announcements.length > 0) {
+          setSessionAnnouncementsRead(true);
+      }
+  }, [activeView, announcements.length, isAuthenticated]);
+
+  useEffect(() => {
+      const approvedDeletionRequests = approvals.filter(a => a.type === 'Deletion' && a.status === 'Approved' && a.relatedId);
+      approvedDeletionRequests.forEach(async (req) => {
+          try {
+              if (req.relatedType === 'Project') {
+                  setProjects(prev => prev.filter(p => p.id !== req.relatedId));
+                  await syncToBackend('projects', 'DELETE', {}, req.relatedId);
+              } else if (req.relatedType === 'Archive') {
+                  // 这里复用核心同步删除逻辑
+                  handleDeleteArchive(req.relatedId!);
+              } else if (req.relatedType === 'Client') {
+                  setClients(prev => prev.filter(c => c.id !== req.relatedId));
+                  await syncToBackend('clients', 'DELETE', {}, req.relatedId);
+              } else if (req.relatedType === 'Equipment') {
+                  setEquipment(prev => prev.filter(e => e.id !== req.relatedId));
+                  await syncToBackend('equipment', 'DELETE', {}, req.relatedId);
+              } else if (req.relatedType === 'Payment') {
+                  setPaymentRecords(prev => prev.filter(p => p.id !== req.relatedId));
+                  await syncToBackend('payments', 'DELETE', {}, req.relatedId);
+              } else if (req.relatedType === 'WorkLog') {
+                  setWorkLogs(prev => prev.filter(l => l.id !== req.relatedId));
+                  await syncToBackend('worklogs', 'DELETE', {}, req.relatedId);
+              } else if (req.relatedType === 'Doc') {
+                  setDocs(prev => prev.filter(d => d.id !== req.relatedId));
+                  await syncToBackend('docs', 'DELETE', {}, req.relatedId);
+              }
+              onDeleteApproval(req.id);
+              notify(`批准删除成功：${req.title}`, 'success');
+              fetchData();
+          } catch (e) {
+              console.error("Auto delete error", e);
+          }
+      });
+  }, [approvals]);
+
+  // ==================================================================================
+  // 4. HELPER FUNCTIONS
+  // ==================================================================================
+
+  const loadLocal = <T,>(key: string, initial: T): T => {
+    const saved = localStorage.getItem(`ierp_${key}`);
+    if (saved) {
+        try { return JSON.parse(saved); } catch(e) { console.error("LS Parse Error", e); }
+    }
+    return initial;
+  };
+
+  const saveToLocal = (key: string, data: any) => {
+    try {
+        localStorage.setItem(`ierp_${key}`, JSON.stringify(data));
+    } catch (e) {
+        console.warn(`LocalStorage write failed for ${key}`);
+    }
+  };
+
+  const safeJson = async (response: Response) => {
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const text = await response.text();
+      try {
+          return JSON.parse(text);
+      } catch (e) {
+          return [];
+      }
+  };
+
+  const sendBrowserNotification = (title: string, body: string, category: NotificationCategory) => {
+      const prefs = userPrefs; 
+      if (!prefs.enableBrowser) return;
+      const typeKey = category.toLowerCase() as keyof typeof prefs.types;
+      if (!prefs.types[typeKey]) return;
+      
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+
+      const notifId = `${title}-${body}`;
+      const now = Date.now();
+      if (lastNotificationRef.current.id === notifId && (now - lastNotificationRef.current.time) < 3000) return; 
+      lastNotificationRef.current = { id: notifId, time: now };
+
+      try { 
+          const notification = new Notification(title, { 
+              body, 
+              icon: appSettings.logoUrl || '/icon.png', 
+              tag: category,
+              requireInteraction: false
+          });
+          notification.onclick = function(event) {
+              event.preventDefault();
+              window.focus();
+              notification.close();
+          };
+      } catch (e) { 
+          console.error("Notification error", e);
+      }
+  };
+
+  const notify = (message: string, type: NotificationType = 'success', details?: string, category: NotificationCategory = 'System', relatedId?: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2);
+    
+    if (category === 'Chat' || category === 'Approval' || category === 'Task') {
+        sendBrowserNotification(type === 'error' ? '系统提醒' : 'i ERP 消息', message, category);
+    }
+
+    const newNotification: AppNotification = { 
+        id, message, details, type, category, timestamp: new Date().toISOString(), read: false, isVisible: true, relatedId 
+    };
+    setNotifications(prev => [newNotification, ...prev].slice(0, 100));
+    setTimeout(() => { setNotifications(prev => prev.map(n => n.id === id ? { ...n, isVisible: false } : n)); }, 3000);
+  };
+
+  const dismissToast = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, isVisible: false } : n));
+  const markAllNotificationsAsRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const handleDeleteNotification = (id: string) => setNotifications(prev => prev.filter(n => n.id !== id));
+
+  const syncToBackend = async (resource: string, method: string, data: any, id?: string) => {
+      try {
+          const url = id ? `${API_URL}/${resource}/${id}` : `${API_URL}/${resource}`;
+          const activeId = localStorage.getItem('ierp_current_user_id') || currentUser.id;
+          const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+              'x-user-id': activeId 
+          };
+          
+          const options: RequestInit = { method, headers, body: JSON.stringify(data) };
+          const res = await fetch(url, options);
+          if (!res.ok) {
+              if (res.status === 403) {
+                  const errData = await res.json().catch(() => ({}));
+                  notify(errData.error || '操作被拒绝：您没有权限修改此数据。', 'error', undefined, 'System');
+                  throw new Error('Forbidden');
+              }
+              const errText = await res.text();
+              throw new Error(`Failed to sync ${resource}: ${res.status} - ${errText}`);
+          }
+          return res;
+      } catch (error) {
+          console.error(`[Sync Engine] Fatal for ${resource}:`, error);
+          throw error;
+      }
+  };
+
+  const checkAuth = (currentUsersList: User[]) => {
+    const savedUserId = localStorage.getItem('ierp_current_user_id');
+    if (savedUserId) {
+        const found = currentUsersList.find(u => u.id === savedUserId);
+        if (found) {
+            setCurrentUser(found);
+            setIsAuthenticated(true);
+            
+            if (found.lastReadMap) {
+                setChatLastReadMap(found.lastReadMap);
+                localStorage.setItem(`ierp_chat_read_${found.id}`, JSON.stringify(found.lastReadMap));
+            }
+
+            if (found.preferences) {
+                setUserPrefs(found.preferences);
+                localStorage.setItem(`ierp_prefs_${found.id}`, JSON.stringify(found.preferences));
+            }
+        } else {
+            localStorage.removeItem('ierp_current_user_id');
+            setIsAuthenticated(false);
+        }
+    }
+  };
+
+  const handleProtectedDelete = async (item: any, resourceType: string, itemName: string, deleteCallback: (id: string) => void) => {
+      const isOwner = item.creatorId === currentUser.id || item.userId === currentUser.id || item.manager === currentUser.nickname || item.managerName === currentUser.nickname || item.uploader === currentUser.nickname;
+      const isSuperAdmin = currentUser.isDefaultAdmin;
+      
+      const createdAt = new Date(item.createdAt || item.uploadDate || new Date().toISOString());
+      const now = new Date();
+      const hoursDiff = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+
+      if (isSuperAdmin || (isOwner && hoursDiff < 24)) {
+          if (window.confirm(`确定要删除 ${itemName} 吗？数据将被移动至回收站，30天后自动清除。`)) {
+              deleteCallback(item.id);
+          }
+      } else {
+          if (window.confirm(`该数据已超过 24 小时保护期。为了保障工程数据安全性，删除该项需要向超级管理员提出申请。是否立即发起删除申请？`)) {
+              const superAdmin = users.find(u => u.isDefaultAdmin);
+              const nowISO = new Date().toISOString();
+              const newApproval: Approval = {
+                  id: Math.random().toString(36).substr(2, 9),
+                  title: `[删除申请] ${itemName}`,
+                  type: 'Deletion',
+                  applicantId: currentUser.id,
+                  applicantName: currentUser.nickname,
+                  department: currentUser.department,
+                  
+                  strategy: 'OR_SIGN', 
+                  approverIds: [superAdmin?.id || 'u-1'],
+                  approverNamesDisplay: superAdmin?.nickname || '超级管理员',
+
+                  status: 'Pending',
+                  currentContent: `申请删除类型为 ${resourceType} 的项目：${itemName} (ID: ${item.id})。申请人：${currentUser.nickname}。`,
+                  currentAttachments: [],
+                  versions: [],
+                  createdAt: nowISO,
+                  updatedAt: nowISO,
+                  relatedId: item.id,
+                  relatedType: resourceType
+              };
+              handleAddApproval(newApproval);
+              notify('删除申请已提交', 'info', '申请已发送至超级管理员，获批后系统将自动执行删除。', 'Approval');
+          }
+      }
+  };
+
+  // ==================================================================================
+  // 5. DATA FETCHING & POLLING
+  // ==================================================================================
+
+  const ensureAdminExists = (userList: User[]) => {
+      const hasAdmin = userList.some(u => u.nickname === 'admin' || u.id === 'u-1');
+      if (!hasAdmin) {
+          const defaultAdmin = { ...INITIAL_USERS[0] }; 
+          return [defaultAdmin, ...userList];
+      }
+      return userList;
+  };
+
+  const fetchData = async () => {
+    setConnectionStatus('connecting');
+    const savedUserId = localStorage.getItem('ierp_current_user_id');
+    const headers: Record<string, string> = savedUserId ? { 'x-user-id': savedUserId } : {};
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); 
+
+        const responses = await Promise.allSettled([
+            fetch(`${API_URL}/projects`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/clients`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/equipment`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/schedule`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/docs`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/archives`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/production`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/users`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/settings`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/payments`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/approvals`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/worklogs`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/messages`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/channels`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/announcements`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/ai_messages`, { signal: controller.signal, headers }),
+            fetch(`${API_URL}/recycle_bin`, { signal: controller.signal, headers })
+        ]);
+        clearTimeout(timeoutId);
+
+        const getJson = async (res: PromiseSettledResult<Response>) => {
+            if (res.status === 'fulfilled' && res.value.ok) return await safeJson(res.value);
+            return null;
+        };
+
+        const loadedProjects = await getJson(responses[0]);
+        if (Array.isArray(loadedProjects)) {
+            const processedProjects = loadedProjects.map((p: Project) => {
+                if (!p.nodes || p.nodes.length === 0) {
+                    return { ...p, nodes: JSON.parse(JSON.stringify(INITIAL_WORKFLOW)) };
+                }
+                return p;
+            });
+            setProjects(processedProjects); 
+            saveToLocal('projects', processedProjects);
+        }
+        
+        let loadedUsers = await getJson(responses[7]);
+        if (Array.isArray(loadedUsers) && loadedUsers.length > 0) {
+            loadedUsers = ensureAdminExists(loadedUsers);
+            setUsers(loadedUsers);
+            saveToLocal('users', loadedUsers);
+            checkAuth(loadedUsers);
+        }
+        
+        const loadedClients = await getJson(responses[1]);
+        if (loadedClients) { setClients(loadedClients); saveToLocal('clients', loadedClients); }
+
+        const loadedEquipment = await getJson(responses[2]);
+        if (loadedEquipment) { setEquipment(loadedEquipment); saveToLocal('equipment', loadedEquipment); }
+
+        const loadedSchedule = await getJson(responses[3]);
+        if (loadedSchedule) setSchedule(loadedSchedule);
+
+        const loadedDocs = await getJson(responses[4]);
+        if (loadedDocs) setDocs(loadedDocs);
+
+        const loadedArchives = await getJson(responses[5]);
+        if (loadedArchives) setArchives(loadedArchives);
+
+        const loadedProduction = await getJson(responses[6]);
+        if (loadedProduction) setProductionData(loadedProduction);
+        
+        const settingsData = await getJson(responses[8]);
+        if (Array.isArray(settingsData) && settingsData.length > 0) {
+            const globalSettings = settingsData.find((s: AppSettings) => s.id === 'global_config') || settingsData[0];
+            setAppSettings({ ...globalSettings, id: 'global_config' }); 
+            saveToLocal('settings', globalSettings);
+        }
+
+        const loadedPayments = await getJson(responses[9]);
+        if (loadedPayments) setPaymentRecords(loadedPayments);
+
+        const loadedApprovals = await getJson(responses[10]);
+        if (loadedApprovals) setApprovals(loadedApprovals);
+
+        const loadedWorkLogs = await getJson(responses[11]);
+        if (loadedWorkLogs) setWorkLogs(loadedWorkLogs);
+        
+        const loadedMessages = await getJson(responses[12]);
+        if (loadedMessages) setMessages(loadedMessages);
+
+        const loadedChannels = await getJson(responses[13]);
+        if (loadedChannels) setChannels(loadedChannels);
+
+        const loadedAnnouncements = await getJson(responses[14]);
+        if (loadedAnnouncements) setAnnouncements(loadedAnnouncements);
+
+        const loadedAiMessages = await getJson(responses[15]);
+        if (Array.isArray(loadedAiMessages)) setAiMessages(loadedAiMessages);
+
+        const loadedRecycleBin = await getJson(responses[16]);
+        if (Array.isArray(loadedRecycleBin)) setRecycleBin(loadedRecycleBin);
+
+        setConnectionStatus('connected');
+    } catch (error) {
+        console.warn("Backend poll skipped, using cache.");
+        setConnectionStatus('offline');
+    } finally {
+        setIsLoaded(true);
+    }
+  };
+
+  const lastHeartbeatRef = useRef<number>(0);
+
+  const pollUpdates = async () => {
+      const { currentUser: currentU } = stateRef.current;
+      if (connectionStatus !== 'connected' || !isAuthenticated) return;
+      
+      try {
+          const headers: Record<string, string> = { 'x-user-id': currentU.id };
+
+          const now = Date.now();
+          if (now - lastHeartbeatRef.current > 45000) {
+              lastHeartbeatRef.current = now;
+              syncToBackend('users', 'PUT', currentU, currentU.id).catch(() => {
+                  console.debug('Heartbeat sync skipped');
+              });
+          }
+
+          const usersRes = await fetch(`${API_URL}/users`, { headers });
+          if (usersRes.ok) {
+              let serverUsers = await safeJson(usersRes);
+              if (Array.isArray(serverUsers) && serverUsers.length > 0) {
+                  serverUsers = ensureAdminExists(serverUsers);
+                  setUsers(serverUsers);
+                  saveToLocal('users', serverUsers);
+                  const self = serverUsers.find((u: User) => u.id === currentU.id);
+                  if (self && JSON.stringify(self) !== JSON.stringify(currentU)) {
+                      setCurrentUser(self);
+                  }
+              }
+          }
+
+          const msgRes = await fetch(`${API_URL}/messages`, { headers });
+          if (msgRes.ok) {
+              const serverMessages = await safeJson(msgRes);
+              if (Array.isArray(serverMessages)) setMessages(serverMessages);
+          }
+          
+          const [channelRes, annRes, workLogRes, paymentRes, approvalRes, projRes, aiRes, recycleRes] = await Promise.all([
+              fetch(`${API_URL}/channels`, { headers }),
+              fetch(`${API_URL}/announcements`, { headers }),
+              fetch(`${API_URL}/worklogs`, { headers }),
+              fetch(`${API_URL}/payments`, { headers }),
+              fetch(`${API_URL}/approvals`, { headers }),
+              fetch(`${API_URL}/projects`, { headers }),
+              fetch(`${API_URL}/ai_messages`, { headers }),
+              fetch(`${API_URL}/recycle_bin`, { headers })
+          ]);
+
+          if (channelRes.ok) {
+              const data = await safeJson(channelRes);
+              if (Array.isArray(data)) setChannels(data);
+          }
+          if (annRes.ok) {
+              const data = await safeJson(annRes);
+              if (Array.isArray(data)) setAnnouncements(data);
+          }
+          if (workLogRes.ok) {
+              const data = await safeJson(workLogRes);
+              if (Array.isArray(data)) setWorkLogs(data);
+          }
+          if (paymentRes.ok) {
+              const data = await safeJson(paymentRes);
+              if (Array.isArray(data)) setPaymentRecords(data);
+          }
+          if (approvalRes.ok) {
+              const data = await safeJson(approvalRes);
+              if (Array.isArray(data)) setApprovals(data);
+          }
+          if (projRes.ok) {
+              const data = await safeJson(projRes);
+              if (Array.isArray(data)) setProjects(data);
+          }
+          if (aiRes.ok) {
+              const data = await safeJson(aiRes);
+              if (Array.isArray(data)) setAiMessages(data);
+          }
+          if (recycleRes.ok) {
+              const data = await safeJson(recycleRes);
+              if (Array.isArray(data)) setRecycleBin(data);
+          }
+      } catch (e) { }
+  };
+
+  // ==================================================================================
+  // 6. EVENT HANDLERS
+  // ==================================================================================
+
+  const handleUpdateProject = async (updatedProject: Project) => {
+      setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+      if (selectedProject?.id === updatedProject.id) setSelectedProject(updatedProject);
+      try { 
+          await syncToBackend('projects', 'PUT', updatedProject, updatedProject.id); 
+          notify('项目更新成功', 'success'); 
+      } catch (e) { notify('同步失败', 'error'); }
+  };
+  
+  const handleAddProject = async (projectPart: Partial<Project>) => {
+      const generatedCode = projectPart.internalContractNo || `PJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`;
+      const newProject = { 
+          id: Math.random().toString(36).substr(2, 9), 
+          name: projectPart.name!, 
+          code: generatedCode,
+          contractNo: projectPart.contractNo,
+          internalContractNo: projectPart.internalContractNo,
+          clientName: projectPart.clientName!, 
+          manager: projectPart.manager!, 
+          startDate: projectPart.startDate!, 
+          deadline: projectPart.deadline!, 
+          status: 'Pending', 
+          progress: 0, 
+          nodes: JSON.parse(JSON.stringify(INITIAL_WORKFLOW)),
+          createdAt: new Date().toISOString(),
+          ...projectPart 
+      } as Project;
+      setProjects(prev => [...prev, newProject]);
+      try { 
+          await syncToBackend('projects', 'POST', newProject); 
+          notify('项目创建成功', 'success'); 
+      } catch (e) { notify('创建失败', 'error'); }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+      const proj = projects.find(p => p.id === projectId);
+      if (!proj) return;
+      handleProtectedDelete(proj, 'projects', proj.name, async (id) => {
+          setProjects(prev => prev.filter(p => p.id !== id));
+          try { 
+              await syncToBackend('projects', 'DELETE', {}, id);
+              notify('项目已移至回收站', 'info'); 
+              fetchData();
+          } catch (e) { notify('删除失败', 'error'); }
+      });
+  };
+
+  const handleUpdateWorkflowNode = (updatedNode: WorkflowNode) => {
+      if(!selectedProject) return;
+      const newNodes = selectedProject.nodes.map(n => n.id === updatedNode.id ? updatedNode : n);
+      const completedCount = newNodes.filter(n => n.status === 'COMPLETED').length;
+      const totalCount = newNodes.length;
+      const newProgress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+      handleUpdateProject({ ...selectedProject, nodes: newNodes, progress: newProgress });
+  };
+
+  const handleAddUser = async (user: User) => {
+      setUsers(prev => [...prev, user]);
+      try { 
+          await syncToBackend('users', 'POST', user); 
+          notify('用户创建成功', 'success'); 
+      } catch (e) { notify('创建失败', 'error'); }
+  };
+
+  const handleUpdateUser = async (user: User) => {
+      setUsers(prev => prev.map(u => u.id === user.id ? user : u));
+      if (currentUser.id === user.id) setCurrentUser(user);
+      try { 
+          await syncToBackend('users', 'PUT', user, user.id); 
+          notify('用户资料已更新', 'success'); 
+      } catch (e) { notify('同步失败', 'error'); }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+      if (currentUser.id === userId) return alert("不能注销当前账户");
+      try { 
+          await syncToBackend('users', 'DELETE', {}, userId); 
+          setUsers(prev => prev.filter(u => u.id !== userId));
+          notify('用户已注销', 'success'); 
+          fetchData(); 
+      } catch (e) { notify('注销失败', 'error'); }
+  };
+
+  const handleAddClient = (client: Client) => {
+      setClients(p => [...p, client]);
+      syncToBackend('clients', 'POST', client);
+  };
+  
+  const handleUpdateClient = (client: Client) => {
+      setClients(p => p.map(c => c.id === client.id ? client : c));
+      syncToBackend('clients', 'PUT', client, client.id);
+  };
+  
+  const handleDeleteClient = (id: string) => {
+      const client = clients.find(c => c.id === id);
+      if (!client) return;
+      handleProtectedDelete(client, 'clients', client.companyName, (id) => {
+          setClients(p => p.filter(c => c.id !== id));
+          syncToBackend('clients', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleAddContact = (clientId: string, contact: Contact) => {
+      const client = clients.find(c => c.id === clientId);
+      if (!client) return;
+      handleUpdateClient({ ...client, contacts: [...client.contacts, contact] });
+  };
+
+  const handleAddEquipment = (eq: Equipment) => {
+      const newEq = { ...eq, createdAt: new Date().toISOString() };
+      setEquipment(p => [...p, newEq]);
+      syncToBackend('equipment', 'POST', newEq);
+  };
+
+  const handleUpdateEquipment = (eq: Equipment) => {
+      setEquipment(p => p.map(e => e.id === eq.id ? eq : e));
+      syncToBackend('equipment', 'PUT', eq, eq.id);
+  };
+
+  const handleDeleteEquipment = (id: string) => {
+      const eq = equipment.find(e => e.id === id);
+      if (!eq) return;
+      handleProtectedDelete(eq, 'equipment', eq.name, (id) => {
+          setEquipment(p => p.filter(e => e.id !== id));
+          syncToBackend('equipment', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleAddArchive = (archive: ArchiveItem) => {
+      const newArc = { ...archive, createdAt: new Date().toISOString() };
+      setArchives(p => [...p, newArc]);
+      syncToBackend('archives', 'POST', newArc);
+  };
+
+  const handleUpdateArchive = (updatedArchive: ArchiveItem) => {
+      setArchives(prev => prev.map(a => a.id === updatedArchive.id ? updatedArchive : a));
+      syncToBackend('archives', 'PUT', updatedArchive, updatedArchive.id);
+  };
+
+  const handleDeleteArchive = (id: string) => {
+      const arc = archives.find(a => a.id === id);
+      if (!arc) return;
+      handleProtectedDelete(arc, 'archives', arc.title, async (id) => {
+          // 核心同步逻辑：1. 从全局档案列表中删除
+          setArchives(p => p.filter(a => a.id !== id));
+          
+          // 2. 深度同步：遍历所有项目，从每一个任务节点的附件中移除该文件的引用
+          setProjects(prevProjects => {
+              const updatedProjects = prevProjects.map(project => {
+                  let hasChanges = false;
+                  const updatedNodes = project.nodes.map(node => {
+                      const filteredAttachments = node.attachments.filter(att => att.id !== id);
+                      if (filteredAttachments.length !== node.attachments.length) {
+                          hasChanges = true;
+                          return { ...node, attachments: filteredAttachments };
+                      }
+                      return node;
+                  });
+                  
+                  if (hasChanges) {
+                      // 如果项目发生了变化，异步推送到后端
+                      const updatedProject = { ...project, nodes: updatedNodes };
+                      syncToBackend('projects', 'PUT', updatedProject, updatedProject.id);
+                      return updatedProject;
+                  }
+                  return project;
+              });
+              return updatedProjects;
+          });
+
+          // 3. 同步至后端档案库
+          try {
+              await syncToBackend('archives', 'DELETE', {}, id);
+              notify('档案已移至回收站', 'info'); 
+              fetchData();
+          } catch (e) { notify('删除同步失败', 'error'); }
+      });
+  };
+
+  const handleAddDoc = (doc: DocItem) => {
+      const newDoc = { ...doc, createdAt: new Date().toISOString() };
+      setDocs(p => [...p, newDoc]);
+      syncToBackend('docs', 'POST', newDoc);
+  };
+
+  const handleUpdateDoc = (doc: DocItem) => {
+      setDocs(p => p.map(d => d.id === doc.id ? doc : d));
+      syncToBackend('docs', 'PUT', doc, doc.id);
+  };
+
+  const handleDeleteDoc = (id: string) => {
+      const doc = docs.find(d => d.id === id);
+      if (!doc) return;
+      handleProtectedDelete(doc, 'docs', doc.title, (id) => {
+          setDocs(p => p.filter(d => d.id !== id));
+          syncToBackend('docs', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleAddScheduleItem = (item: ScheduleItem) => {
+      const newItem = { ...item, createdAt: new Date().toISOString(), userId: currentUser.id };
+      setSchedule(p => [...p, newItem]);
+      syncToBackend('schedule', 'POST', newItem);
+  };
+
+  const handleCompleteScheduleItem = (id: string) => {
+      const item = schedule.find(s => s.id === id);
+      if (!item) return;
+      const updated = { ...item, isCompleted: true };
+      setSchedule(p => p.map(s => s.id === id ? updated : s));
+      syncToBackend('schedule', 'PUT', updated, id);
+  };
+
+  const handleDeleteScheduleItem = (id: string) => {
+      const item = schedule.find(s => s.id === id);
+      if (!item) return;
+      handleProtectedDelete(item, 'schedule', item.title, (id) => {
+          setSchedule(p => p.filter(s => s.id !== id));
+          syncToBackend('schedule', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleUpdateProduction = (projProd: ProjectProduction) => {
+      setProductionData(prev => {
+          const exists = prev.find(i => i.projectId === projProd.projectId);
+          if (exists) return prev.map(i => i.projectId === projProd.projectId ? projProd : i);
+          return [...prev, projProd];
+      });
+      syncToBackend('production', 'POST', projProd);
+  };
+
+  const handleDeleteProduction = (projectId: string) => {
+      const prod = productionData.find(p => p.projectId === projectId);
+      if (!prod) return;
+      handleProtectedDelete(prod, 'production', prod.projectName, (id) => {
+          setProductionData(prev => prev.filter(p => p.projectId !== id));
+          syncToBackend('production', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleAddApproval = (approval: Approval) => {
+      setApprovals(p => [...p, approval]);
+      syncToBackend('approvals', 'POST', approval);
+  };
+
+  const handleUpdateApproval = (approval: Approval) => {
+      setApprovals(p => p.map(a => a.id === approval.id ? approval : a));
+      syncToBackend('approvals', 'PUT', approval, approval.id);
+  };
+
+  const onDeleteApproval = (id: string) => {
+      setApprovals(p => p.filter(a => a.id !== id));
+      syncToBackend('approvals', 'DELETE', {}, id).then(() => fetchData());
+  };
+
+  const handleAddPayment = (payment: PaymentRecord) => {
+      const newPay = { ...payment, createdAt: new Date().toISOString(), creatorId: currentUser.id };
+      setPaymentRecords(p => [...p, newPay]);
+      syncToBackend('payments', 'POST', newPay);
+  };
+
+  const handleUpdatePayment = (payment: PaymentRecord) => {
+      setPaymentRecords(p => p.map(pr => pr.id === payment.id ? payment : pr));
+      syncToBackend('payments', 'PUT', payment, payment.id);
+  };
+
+  const handleDeletePayment = (id: string) => {
+      const pay = paymentRecords.find(p => p.id === id);
+      if (!pay) return;
+      handleProtectedDelete(pay, 'payments', pay.projectName, (id) => {
+          setPaymentRecords(p => p.filter(pr => pr.id !== id));
+          syncToBackend('payments', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleAddWorkLog = (log: WorkLogEntry) => {
+      setWorkLogs(p => [...p, log]);
+      syncToBackend('worklogs', 'POST', log);
+  };
+
+  const handleUpdateWorkLog = (log: WorkLogEntry) => {
+      setWorkLogs(p => p.map(l => l.id === log.id ? log : l));
+      syncToBackend('worklogs', 'PUT', log, log.id);
+  };
+
+  const handleDeleteWorkLog = (id: string) => {
+      const log = workLogs.find(l => l.id === id);
+      if (!log) return;
+      handleProtectedDelete(log, 'worklogs', `${log.userName} ${log.date} 工时`, (id) => {
+          setWorkLogs(p => p.filter(l => l.id !== id));
+          syncToBackend('worklogs', 'DELETE', {}, id).then(() => fetchData());
+      });
+  };
+
+  const handleSendMessage = (msg: ChatMessage) => {
+      setMessages(p => [...p, msg]);
+      syncToBackend('messages', 'POST', msg);
+  };
+
+  const handleDeleteMessage = (id: string) => {
+      setMessages(p => p.filter(m => m.id !== id));
+      syncToBackend('messages', 'DELETE', {}, id);
+  };
+
+  const handleAddChannel = (ch: ChatChannel) => {
+      setChannels(p => [...p, ch]);
+      syncToBackend('channels', 'POST', ch);
+  };
+
+  const handleUpdateChannel = (ch: ChatChannel) => {
+      setChannels(p => p.map(c => c.id === ch.id ? ch : c));
+      syncToBackend('channels', 'PUT', ch, ch.id);
+  };
+
+  const handleDeleteChannel = (id: string) => {
+      setChannels(p => p.filter(c => c.id !== id));
+      syncToBackend('channels', 'DELETE', {}, id);
+  };
+
+  const handleAddAnnouncement = (ann: ChatAnnouncement) => {
+      setAnnouncements(p => [...p, ann]);
+      syncToBackend('announcements', 'POST', ann);
+      setSessionAnnouncementsRead(false);
+  };
+
+  const handleUpdateAnnouncement = (ann: ChatAnnouncement) => {
+      setAnnouncements(p => p.map(a => a.id === ann.id ? ann : a));
+      syncToBackend('announcements', 'PUT', ann, ann.id);
+  };
+
+  const handleDeleteAnnouncement = (id: string) => {
+      setAnnouncements(p => p.filter(a => a.id !== id));
+      syncToBackend('announcements', 'DELETE', {}, id);
+  };
+
+  const handleRestoreRecycleItem = async (id: string) => {
+      try {
+          await fetch(`${API_URL}/recycle_bin/restore/${id}`, {
+              method: 'POST',
+              headers: { 'x-user-id': currentUser.id }
+          });
+          notify('数据已成功恢复', 'success');
+          fetchData();
+      } catch (e) { notify('恢复失败', 'error'); }
+  };
+
+  const handlePermanentDeleteRecycleItem = async (id: string) => {
+      try {
+          await fetch(`${API_URL}/recycle_bin/${id}`, {
+              method: 'DELETE',
+              headers: { 'x-user-id': currentUser.id }
+          });
+          notify('数据已永久删除', 'info');
+          fetchData();
+      } catch (e) { notify('删除失败', 'error'); }
+  };
+
+  const handleEmptyRecycleBin = async () => {
+      if (!window.confirm("确定要彻底清空回收站吗？")) return;
+      try {
+          await fetch(`${API_URL}/recycle_bin/empty/all`, {
+              method: 'DELETE',
+              headers: { 'x-user-id': currentUser.id }
+          });
+          notify('回收站已清空', 'success');
+          fetchData();
+      } catch (e) { notify('清空失败', 'error'); }
+  };
+
+  const handleExportBackup = async () => {
+    try {
+        notify('正在准备备份...', 'info');
+        const res = await fetch(`${API_URL}/backup/export`, { headers: { 'x-user-id': currentUser.id } });
+        const backupData = await res.json();
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `iERP_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        notify('备份已下载', 'success');
+    } catch (e) { notify('导出失败', 'error'); }
+  };
+
+  const handleImportBackup = async (file: File) => {
+    if (!window.confirm("导入备份将覆盖所有当前数据！确定吗？")) return;
+    try {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const content = e.target?.result as string;
+            const res = await fetch(`${API_URL}/backup/import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+                body: content
+            });
+            if (res.ok) {
+                notify('还原成功，即将刷新', 'success');
+                setTimeout(() => window.location.reload(), 2000);
+            }
+        };
+        reader.readAsText(file);
+    } catch (e) { notify('解析出错', 'error'); }
+  };
+
+  const handleSendAiMessage = (msg: any) => {
+      const msgWithUser = { ...msg, userId: currentUser.id };
+      setAiMessages(prev => [...prev, msgWithUser]);
+      syncToBackend('ai_messages', 'POST', msgWithUser);
+  };
+
+  const handleDeleteAiMessage = (id: string) => {
+      setAiMessages(prev => prev.filter(m => m.id !== id));
+      syncToBackend('ai_messages', 'DELETE', {}, id);
+  };
+
+  const handleClearAiHistory = async () => {
+      const myMsgs = aiMessages.filter(m => m.userId === currentUser.id);
+      for (const msg of myMsgs) {
+          await syncToBackend('ai_messages', 'DELETE', {}, msg.id);
+      }
+      setAiMessages(prev => prev.filter(m => m.userId !== currentUser.id));
+  };
+
+  const handleMarkChatRead = useCallback((channelId: string) => {
+      const now = new Date().toISOString();
+      setChatLastReadMap(prev => {
+          const updated = { ...prev, [channelId]: now };
+          setCurrentUser(curr => {
+              const updatedUser = { ...curr, lastReadMap: updated };
+              syncToBackend('users', 'PUT', updatedUser, updatedUser.id);
+              return updatedUser;
+          });
+          return updated;
+      });
+  }, [currentUser.id]);
+
+  const handleSaveSettings = async (newSettings: AppSettings) => {
+    setAppSettings(newSettings);
+    try {
+        await syncToBackend('settings', 'PUT', newSettings, 'global_config');
+        notify('系统设置已同步', 'success');
+    } catch (e) { notify('设置同步失败', 'error'); }
+  };
+
+  const handleSaveUserPrefs = async (newPrefs: UserPreferences) => {
+      setUserPrefs(newPrefs);
+      const updatedUser = { ...currentUser, preferences: newPrefs };
+      setCurrentUser(updatedUser);
+      try {
+          await syncToBackend('users', 'PUT', updatedUser, updatedUser.id);
+          notify('偏好设置已同步', 'success');
+      } catch (e) { notify('同步失败', 'error'); }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('ierp_current_user_id');
+    setIsAuthenticated(false);
+    setCurrentUser(INITIAL_USERS[0]);
+    notify('已退出', 'info');
+  };
+
+  const handleNavigate = (view: string) => {
+    setActiveView(view);
+    if (view === 'projects') setSelectedProject(null);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
+  const chatUnreadCount = useMemo(() => {
+      if (!isAuthenticated) return 0;
+      let count = 0;
+      channels.forEach(c => {
+          if (c.id === activeChannelId) return;
+          const lastRead = chatLastReadMap[c.id] || '1970-01-01';
+          count += messages.filter(m => m.channelId === c.id && m.timestamp > lastRead).length;
+      });
+      return count;
+  }, [messages, channels, chatLastReadMap, activeChannelId, isAuthenticated]);
+
+  const pendingApprovalCount = useMemo(() => {
+    if (!isAuthenticated) return 0;
+    return approvals.filter(a => {
+        if (a.status !== 'Pending' || a.applicantId === currentUser.id) return false;
+        const outcomes = a.versions?.[0]?.outcomes || [];
+        const signedIds = outcomes.map(o => o.approverId);
+        return a.approverIds.includes(currentUser.id) && !signedIds.includes(currentUser.id);
+    }).length;
+  }, [approvals, currentUser.id, isAuthenticated]);
+
+  if (!isAuthenticated) {
+      return (
+          <Login 
+              users={users} 
+              onLogin={(u) => { 
+                  localStorage.setItem('ierp_current_user_id', u.id); 
+                  setCurrentUser(u); 
+                  setIsAuthenticated(true); 
+                  fetchData(); 
+              }} 
+              appName={appSettings?.appName} 
+              logoUrl={appSettings?.logoUrl} 
+          />
+      );
+  }
+
+  return (
+    <div className="flex min-h-[100dvh] bg-slate-200 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 transition-colors fixed inset-0">
+      <NotificationToast notifications={notifications} onDismiss={dismissToast} />
+      <Sidebar 
+          activeView={activeView} 
+          onNavigate={handleNavigate} 
+          isOpen={sidebarOpen} 
+          onClose={() => setSidebarOpen(false)} 
+          currentUser={currentUser} 
+          settings={appSettings} 
+          onOpenSettings={() => setIsSettingsOpen(true)} 
+          onOpenUserPrefs={() => setIsUserPrefsOpen(true)} 
+          onLogout={handleLogout} 
+          chatUnreadCount={chatUnreadCount} 
+          pendingApprovalCount={pendingApprovalCount}
+      />
+      <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden">
+        <Header 
+            onMenuToggle={() => setSidebarOpen(!sidebarOpen)} 
+            currentUser={currentUser} 
+            allUsers={users} 
+            onSwitchUser={() => {}} 
+            settings={appSettings} 
+            notifications={notifications} 
+            onMarkAllRead={markAllNotificationsAsRead} 
+            onDeleteNotification={handleDeleteNotification} 
+            onLogout={handleLogout} 
+            connectionStatus={connectionStatus} 
+            theme={theme} 
+            toggleTheme={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')} 
+            onOpenUserPrefs={() => setIsUserPrefsOpen(true)} 
+            userPrefs={userPrefs} 
+        />
+        <main className={`flex-1 overflow-y-auto ${activeView === 'chat' ? 'p-0' : 'p-4 md:p-8'}`}>
+            {activeView === 'projects' && (selectedProject ? 
+                <ProjectWorkflow project={selectedProject} nodes={selectedProject.nodes} onUpdateNode={handleUpdateWorkflowNode} onUpdateProject={handleUpdateProject} onBack={() => setSelectedProject(null)} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} archives={archives.filter(a => a.projectId === selectedProject.id)} currentUser={currentUser} users={users}/> :
+                <ProjectList projects={projects} users={users} clients={clients} onSelectProject={setSelectedProject} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onAddProject={handleAddProject} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} currentUser={currentUser} onAddApproval={handleAddApproval}/>
+            )}
+            {activeView === 'production' && <ProductionProgress projects={projects} productionData={productionData} onUpdateProject={handleUpdateProduction} onDeleteProjectProduction={handleDeleteProduction} currentUser={currentUser} />}
+            {activeView === 'approvals' && <ApprovalManager approvals={approvals} users={users} currentUser={currentUser} onAddApproval={handleAddApproval} onUpdateApproval={handleUpdateApproval} onDeleteApproval={onDeleteApproval} />}
+            {activeView === 'payments' && <PaymentDashboard payments={paymentRecords} projects={projects} users={users} clients={clients} onAddPayment={handleAddPayment} onUpdatePayment={handleUpdatePayment} onDeletePayment={handleDeletePayment} currentUser={currentUser} />}
+            {activeView === 'schedule' && <DailySchedule schedule={schedule} projects={projects} users={users} onCompleteItem={handleCompleteScheduleItem} onDeleteItem={handleDeleteScheduleItem} onAddItem={handleAddScheduleItem} currentUser={currentUser} onDeleteUser={handleDeleteUser}/>}
+            {/* Fix: Changed handleUpdateLog to handleUpdateWorkLog to match defined function name */}
+            {activeView === 'worklogs' && <WorkLogManager logs={workLogs} users={users} currentUser={currentUser} onAddLog={handleAddWorkLog} onUpdateLog={handleUpdateWorkLog} onDeleteLog={handleDeleteWorkLog} />}
+            {activeView === 'chat' && <TeamChat currentUser={currentUser} messages={messages} channels={channels} projects={projects} users={users} onSendMessage={handleSendMessage} onDeleteMessage={handleDeleteMessage} onAddChannel={handleAddChannel} onUpdateChannel={handleUpdateChannel} lastReadMap={chatLastReadMap} onMarkRead={handleMarkChatRead} onDeleteChannel={handleDeleteChannel} activeChannelId={activeChannelId} onChannelSelect={setActiveChannelId} announcements={announcements} onAddAnnouncement={handleAddAnnouncement} onUpdateAnnouncement={handleUpdateAnnouncement} onDeleteAnnouncement={handleDeleteAnnouncement}/>}
+            {activeView === 'email' && <EmailClient currentUser={currentUser} />}
+            {activeView === 'archives' && <EngineeringArchives archives={archives} projects={projects} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} onUpdateArchive={handleUpdateArchive} currentUser={currentUser} />}
+            {activeView === 'clients' && <ClientManager clients={clients} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onAddContact={handleAddContact} onDeleteClient={handleDeleteClient} currentUser={currentUser} />}
+            {activeView === 'equipment' && <EquipmentLibrary equipmentList={equipment} onAddEquipment={handleAddEquipment} onUpdateEquipment={handleUpdateEquipment} onDeleteEquipment={handleDeleteEquipment} currentUser={currentUser} />}
+            {activeView === 'docs' && <Documentation docs={docs} onAddDoc={handleAddDoc} onUpdateDoc={handleUpdateDoc} onDeleteDoc={handleDeleteDoc} currentUser={currentUser} />}
+            {activeView === 'ai_center' && <AICenter currentUser={currentUser} messages={aiMessages.filter(m => m.userId === currentUser.id)} onSendMessage={handleSendAiMessage} onDeleteMessage={handleDeleteAiMessage} onClearHistory={handleClearAiHistory} />}
+            {activeView === 'users' && <UserManager users={users} currentUser={currentUser} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} />}
+            {activeView === 'recycle_bin' && <RecycleBin items={recycleBin} currentUser={currentUser} onRestore={handleRestoreRecycleItem} onPermanentDelete={handlePermanentDeleteRecycleItem} onEmpty={handleEmptyRecycleBin} />}
+        </main>
+      </div>
+      <SystemSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={appSettings} onSave={handleSaveSettings} onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} />
+      <UserPreferencesModal isOpen={isUserPrefsOpen} onClose={() => setIsUserPrefsOpen(false)} preferences={userPrefs} onSave={handleSaveUserPrefs} />
+    </div>
+  );
+}
+
+export default App;
