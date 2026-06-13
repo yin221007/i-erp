@@ -103,4 +103,8 @@ test('the base stack contains no production host literals and bounds backups', a
     environmentValue(stack.services.backup, 'BACKUP_CAPACITY_BYTES'),
     '536870912000'
   );
+  assert.match(
+    environmentValue(stack.services.backup, 'BACKUP_ID'),
+    /BACKUP_ID/
+  );
 });

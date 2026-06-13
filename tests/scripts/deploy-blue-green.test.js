@@ -34,6 +34,8 @@ test('deployment gates clone rehearsal, snapshot, cutover, and auto rollback', a
 
   assert.match(source, /rollback\.sh/);
   assert.match(source, /AUTO_ROLLBACK/);
+  assert.match(source, /trap automatic_rollback EXIT/);
+  assert.match(source, /\[\[ "\$status" -eq 0 \]\] && exit 0/);
   assert.doesNotMatch(source, /lucky.*(?:api|token)/i);
 });
 

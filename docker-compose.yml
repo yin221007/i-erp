@@ -96,6 +96,7 @@ services:
       UPLOADS_ROOT: /data/uploads
       DEPLOY_ROOT: /data/deploy
       BACKUP_KIND: "${BACKUP_KIND:-daily}"
+      BACKUP_ID: "${BACKUP_ID:-}"
       BACKUP_CAPACITY_BYTES: "536870912000"
       MIN_FREE_BYTES: "${MIN_FREE_BYTES:-21474836480}"
       MIN_FREE_PERCENT: "${MIN_FREE_PERCENT:-10}"

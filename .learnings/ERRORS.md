@@ -341,6 +341,46 @@ Supertest listeners.
 
 ---
 
+## [ERR-20260613-011] cutover-backup-id-and-exit-trap
+
+**Logged**: 2026-06-13T23:45:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: deployment
+
+### Summary
+
+The first production cutover stopped the old stack, but snapshot verification
+looked for a different backup ID and the error trap did not restart the old
+stack.
+
+### Error
+
+```text
+ERROR: Snapshot directory not found: .../20260613T152736Z-upgrade
+```
+
+### Context
+
+- `BACKUP_ID` was set for `docker compose run`, but the backup service did not
+  declare that variable in its environment.
+- The backup container generated its own timestamped ID.
+- `die` exits explicitly, so a trap registered only for `ERR` was not reliable
+  for the failed cutover path.
+- The production migration had not started. The old stack was restarted
+  manually and public service recovered without data changes.
+
+### Resolution
+
+- Pass `BACKUP_ID` through the backup service environment.
+- Use an `EXIT` trap that is disabled on entry and returns immediately for a
+  successful status.
+- Keep the existing cutover-state checks so recovery runs only after the old
+  stack has stopped and before cutover is complete.
+- Added regression tests for both conditions.
+
+---
+
 ## [ERR-20260613-003] npm-registry-dns
 
 **Logged**: 2026-06-13T17:30:00+08:00

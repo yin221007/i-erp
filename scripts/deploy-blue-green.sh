@@ -73,7 +73,9 @@ start_production_candidate() {
 
 automatic_rollback() {
   local status=$?
-  trap - ERR
+  trap - EXIT
+  [[ "$status" -eq 0 ]] && exit 0
+
   if [[ "$old_stopped" -eq 1 && "$cutover_complete" -eq 0 ]]; then
     if [[ "$AUTO_ROLLBACK" == "1" ]]; then
       if [[ "$production_migration_started" -eq 1 && -n "$final_snapshot" ]]; then
@@ -95,7 +97,7 @@ automatic_rollback() {
   fi
   exit "$status"
 }
-trap automatic_rollback ERR
+trap automatic_rollback EXIT
 
 check_inputs() {
   require_env \
