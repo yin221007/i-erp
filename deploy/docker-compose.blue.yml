@@ -7,7 +7,7 @@ services:
     container_name: ierp-blue-backend
     restart: unless-stopped
     mem_limit: 1g
-    cpus: 1.5
+    cpu_shares: 1024
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
@@ -55,7 +55,7 @@ services:
     container_name: ierp-blue-frontend
     restart: unless-stopped
     mem_limit: 256m
-    cpus: 0.5
+    cpu_shares: 256
     security_opt:
       - no-new-privileges:true
     ports:

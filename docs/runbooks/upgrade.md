@@ -7,6 +7,8 @@
 - Use a cloned database and cloned uploads for rehearsal.
 - Do not point Lucky at green until every gate passes.
 - Keep the old stack and final upgrade snapshot for at least seven stable days.
+- Keep `mem_limit` enabled. This Synology kernel does not support Docker CPU
+  CFS quotas, so the release uses `cpu_shares` instead of `cpus`.
 
 ## Required Inputs
 

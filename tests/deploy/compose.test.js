@@ -50,6 +50,8 @@ test('blue and green stacks are isolated and use immutable images', async () => 
       assert.doesNotMatch(service.image, /:latest(?:$|\s)/);
       assert.ok(service.healthcheck);
       assert.ok(service.mem_limit);
+      assert.equal(service.cpus, undefined);
+      assert.ok(service.cpu_shares);
     }
     assert.equal(
       stack.services.frontend.depends_on.backend.condition,
@@ -93,7 +95,8 @@ test('the base stack contains no production host literals and bounds backups', a
   assert.ok(stack.services.backend.healthcheck);
   assert.ok(stack.services.frontend.healthcheck);
   assert.equal(stack.services.backup.mem_limit, '512m');
-  assert.equal(stack.services.backup.cpus, 1);
+  assert.equal(stack.services.backup.cpus, undefined);
+  assert.equal(stack.services.backup.cpu_shares, 512);
   assert.equal(
     environmentValue(stack.services.backup, 'BACKUP_CAPACITY_BYTES'),
     '536870912000'

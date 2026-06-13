@@ -1,5 +1,51 @@
 # Errors
 
+## [ERR-20260613-005] synology-cpu-cfs-quota
+
+**Logged**: 2026-06-13T22:30:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+Synology Docker rejected Compose services using the `cpus` hard limit because
+the NAS kernel does not expose the CPU CFS quota controller.
+
+### Error
+
+```text
+NanoCPUs can not be set, as your kernel does not support CPU CFS scheduler or
+the cgroup is not mounted
+```
+
+### Context
+
+- Docker 24.0.2 reports cgroup v1 with the `cgroupfs` driver.
+- The backup image built successfully, but container creation failed before the
+  backup script started.
+- Memory limits remain supported and are the primary protection against the
+  long-running memory risk identified for this deployment.
+
+### Suggested Fix
+
+Remove hard `cpus` limits from Synology Compose services and use
+`cpu_shares` for relative scheduling weight while retaining `mem_limit`.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `docker-compose.yml`, `deploy/docker-compose.blue.yml`,
+  `deploy/docker-compose.green.yml`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T22:40:00+08:00
+- **Notes**: Replaced `cpus` with `cpu_shares`, retained all memory limits, and
+  added deployment regression coverage.
+
+---
+
 ## [ERR-20260613-001] git-init-working-directory
 
 **Logged**: 2026-06-13T14:00:00+08:00
