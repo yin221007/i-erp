@@ -33,6 +33,10 @@ The current legacy MariaDB endpoint does not offer TLS, so set
 `DB_CLIENT_TLS=disabled`. Change it to `required` when the database endpoint is
 upgraded to provide TLS.
 
+Set `NAS_UID` and `NAS_GID` to the Synology deployment account values returned
+by `id -u` and `id -g`. Backups run with that identity so private snapshots
+remain readable by the deployment and restore scripts.
+
 ## Rehearsal
 
 1. Copy the latest complete backup to a cloned database and uploads directory.

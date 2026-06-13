@@ -1,5 +1,46 @@
 # Errors
 
+## [ERR-20260613-008] backup-root-ownership
+
+**Logged**: 2026-06-13T23:08:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+The backup completed inside the container, but its `0700` snapshot directory
+was owned by root and could not be verified by the Synology deployment account.
+
+### Error
+
+```text
+find: /volume2/docker/ierp-backups/20260613T105316Z-daily: Permission denied
+```
+
+### Context
+
+- The backup bind mount resolved to the expected host path.
+- The snapshot data and completion marker were created successfully.
+- Restore and deployment scripts run as Synology user `yin` (`1026:100`).
+
+### Suggested Fix
+
+Run the backup service with configurable `NAS_UID` and `NAS_GID`.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `docker-compose.yml`, `.env.example`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T23:12:00+08:00
+- **Notes**: Backup containers now use the deployment account identity while
+  retaining private file permissions.
+
+---
+
 ## [ERR-20260613-007] nested-ssh-shell-expansion
 
 **Logged**: 2026-06-13T22:48:00+08:00

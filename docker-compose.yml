@@ -79,6 +79,7 @@ services:
       dockerfile: Dockerfile.backup
     profiles:
       - backup
+    user: "${NAS_UID:?Set NAS_UID}:${NAS_GID:?Set NAS_GID}"
     restart: "no"
     mem_limit: 512m
     cpu_shares: 512

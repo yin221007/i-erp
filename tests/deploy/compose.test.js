@@ -97,6 +97,8 @@ test('the base stack contains no production host literals and bounds backups', a
   assert.equal(stack.services.backup.mem_limit, '512m');
   assert.equal(stack.services.backup.cpus, undefined);
   assert.equal(stack.services.backup.cpu_shares, 512);
+  assert.match(stack.services.backup.user, /NAS_UID/);
+  assert.match(stack.services.backup.user, /NAS_GID/);
   assert.equal(
     environmentValue(stack.services.backup, 'BACKUP_CAPACITY_BYTES'),
     '536870912000'
