@@ -71,3 +71,13 @@ test('payment summary cards use visible semantic hover colors', async () => {
   }
   assert.doesNotMatch(source, /hover:bg-primary-50\/20/);
 });
+
+test('user presence uses the self-service heartbeat instead of writing users', async () => {
+  const source = await readFile(appUrl, 'utf8');
+
+  assert.match(source, /\/auth\/heartbeat/);
+  assert.doesNotMatch(
+    source,
+    /syncToBackend\('users',\s*'PUT',\s*currentU,\s*currentU\.id\)/
+  );
+});

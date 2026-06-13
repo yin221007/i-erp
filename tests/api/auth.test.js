@@ -260,3 +260,23 @@ test('a user can update only their own profile preferences and read state', asyn
   assert.notEqual(stored.password, 'replacement');
   assert.equal(stored.preferences.webhooks.pushPlusToken, 'updated-secret');
 });
+
+test('a normal user heartbeat updates only their own last-active timestamp', async () => {
+  const { app, pool } = await createAuthTestApp();
+  const login = await request(app)
+    .post('/auth/login')
+    .send({ username: 'member', password: 'member-password' })
+    .expect(200);
+  const cookie = sessionCookie(login);
+
+  const response = await request(app)
+    .post('/auth/heartbeat')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .expect(200);
+
+  assert.equal(response.body.user.id, 'u-2');
+  assert.equal(Number.isNaN(Date.parse(response.body.user.lastActive)), false);
+  assert.equal(pool.users.get('u-2').lastActive, response.body.user.lastActive);
+  assert.equal(pool.users.get('u-1').lastActive, undefined);
+});

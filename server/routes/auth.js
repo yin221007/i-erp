@@ -170,6 +170,29 @@ export function createAuthRouter({ pool, loginLimiter = createLoginLimiter() }) 
     }
   });
 
+  router.post('/heartbeat', requireAuth, async (req, res, next) => {
+    try {
+      const updatedUser = {
+        ...req.authUser,
+        lastActive: new Date().toISOString()
+      };
+      const [result] = await pool.query(
+        `UPDATE users
+        SET json_data = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+        [JSON.stringify(updatedUser), req.authUser.id]
+      );
+      if (result.affectedRows !== 1) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      req.authUser = updatedUser;
+      return res.json({ user: toSafeUser(updatedUser) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post('/logout', requireAuth, async (req, res, next) => {
     try {
       await revokeSessionByToken(pool, req.sessionToken);

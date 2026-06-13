@@ -571,7 +571,9 @@ function App() {
           const now = Date.now();
           if (now - lastHeartbeatRef.current > 45000) {
               lastHeartbeatRef.current = now;
-              syncToBackend('users', 'PUT', currentU, currentU.id).catch(() => {
+              apiFetch(`${API_URL}/auth/heartbeat`, {
+                  method: 'POST'
+              }).catch(() => {
                   console.debug('Heartbeat sync skipped');
               });
           }
