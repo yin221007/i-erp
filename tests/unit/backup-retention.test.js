@@ -29,6 +29,7 @@ test('retention keeps seven newest daily backups', () => {
   const result = selectBackupsToDelete(backups, {
     dailyRetention: 7,
     upgradeRetention: 3,
+    manualRetention: 3,
     capacityBytes: 500 * GB,
     requiredBytes: 0
   });
@@ -48,12 +49,55 @@ test('retention keeps three newest unlocked upgrade snapshots and all locked one
   const result = selectBackupsToDelete(backups, {
     dailyRetention: 7,
     upgradeRetention: 3,
+    manualRetention: 3,
     capacityBytes: 500 * GB,
     requiredBytes: 0
   });
 
   assert.deepEqual(result.deleteIds, ['1']);
   assert.equal(result.deleteIds.includes('2'), false);
+});
+
+test('retention keeps three newest manual backups', () => {
+  const backups = Array.from({ length: 5 }, (_, index) =>
+    backup(String(index + 1), { kind: 'manual' })
+  );
+
+  const result = selectBackupsToDelete(backups, {
+    dailyRetention: 7,
+    upgradeRetention: 3,
+    manualRetention: 3,
+    capacityBytes: 500 * GB,
+    requiredBytes: 0
+  });
+
+  assert.deepEqual(result.deleteIds, ['1', '2']);
+});
+
+test('locked pre-restore snapshots are retained unless capacity must be refused', () => {
+  const backups = [
+    backup('1', {
+      kind: 'pre-restore',
+      locked: true,
+      sizeBytes: 300 * GB
+    }),
+    backup('2', {
+      kind: 'pre-restore',
+      locked: true,
+      sizeBytes: 150 * GB
+    })
+  ];
+
+  const result = selectBackupsToDelete(backups, {
+    dailyRetention: 7,
+    upgradeRetention: 3,
+    manualRetention: 3,
+    capacityBytes: 500 * GB,
+    requiredBytes: 100 * GB
+  });
+
+  assert.equal(result.refused, true);
+  assert.deepEqual(result.deleteIds, []);
 });
 
 test('capacity cleanup removes oldest complete unlocked backups first', () => {
@@ -66,6 +110,7 @@ test('capacity cleanup removes oldest complete unlocked backups first', () => {
   const result = selectBackupsToDelete(backups, {
     dailyRetention: 7,
     upgradeRetention: 3,
+    manualRetention: 3,
     capacityBytes: 500 * GB,
     requiredBytes: 200 * GB
   });
@@ -82,6 +127,7 @@ test('capacity cleanup refuses backup when locked data prevents enough space', (
   const result = selectBackupsToDelete(backups, {
     dailyRetention: 7,
     upgradeRetention: 3,
+    manualRetention: 3,
     capacityBytes: 500 * GB,
     requiredBytes: 100 * GB
   });
@@ -100,6 +146,7 @@ test('incomplete generations are deleted and never treated as restore backups', 
   const result = selectBackupsToDelete(backups, {
     dailyRetention: 7,
     upgradeRetention: 3,
+    manualRetention: 3,
     capacityBytes: 500 * GB,
     requiredBytes: 0
   });

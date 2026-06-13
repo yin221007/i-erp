@@ -10,6 +10,7 @@ function validateOptions(options) {
   for (const name of [
     'dailyRetention',
     'upgradeRetention',
+    'manualRetention',
     'capacityBytes',
     'requiredBytes'
   ]) {
@@ -46,6 +47,7 @@ export function selectBackupsToDelete(backups, options) {
 
   selectOutsideRetention('daily', options.dailyRetention);
   selectOutsideRetention('upgrade', options.upgradeRetention);
+  selectOutsideRetention('manual', options.manualRetention);
 
   const remainingSize = () =>
     backups

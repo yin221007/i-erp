@@ -26,12 +26,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/db-client-args.sh"
 
 case "$BACKUP_KIND" in
-  daily|upgrade) ;;
+  daily|upgrade|manual|pre-restore) ;;
   *)
-    printf 'BACKUP_KIND must be daily or upgrade\n' >&2
+    printf 'BACKUP_KIND must be daily, upgrade, manual, or pre-restore\n' >&2
     exit 64
     ;;
 esac
+
+if [[ ! "$BACKUP_ID" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|upgrade|manual|pre-restore)$ ||
+  "$BACKUP_ID" != *-"$BACKUP_KIND" ]]; then
+  printf 'BACKUP_ID must be a UTC timestamp followed by BACKUP_KIND\n' >&2
+  exit 64
+fi
 
 mkdir -p "$BACKUP_ROOT"
 lock_directory="$BACKUP_ROOT/.backup.lock"
@@ -161,6 +167,9 @@ printf '%s\n' \
   '}' > "$incomplete_directory/metadata.json"
 
 touch "$incomplete_directory/complete"
+if [[ "$BACKUP_KIND" == "pre-restore" ]]; then
+  touch "$incomplete_directory/locked"
+fi
 (
   cd "$incomplete_directory"
   sha256sum ./* > manifest.sha256
@@ -169,8 +178,12 @@ touch "$incomplete_directory/complete"
 mv "$incomplete_directory" "$final_directory"
 completed=1
 
-BACKUP_CAPACITY_BYTES="$BACKUP_CAPACITY_BYTES" \
-  node "$SCRIPT_DIR/apply-backup-retention.js" "$BACKUP_ROOT"
+if ! BACKUP_CAPACITY_BYTES="$BACKUP_CAPACITY_BYTES" \
+  node "$SCRIPT_DIR/apply-backup-retention.js" "$BACKUP_ROOT"; then
+  rm -rf "$final_directory"
+  printf 'New backup was removed because the capacity limit cannot be met\n' >&2
+  exit 78
+fi
 
 if [[ ! -d "$final_directory" ]]; then
   printf 'New backup was removed to enforce the capacity limit\n' >&2
