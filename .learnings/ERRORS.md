@@ -1,5 +1,51 @@
 # Errors
 
+## [ERR-20260613-009] legacy-production-entrypoint
+
+**Logged**: 2026-06-13T23:45:00+08:00
+**Priority**: critical
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+The production Docker image still started a legacy monolithic `server.js`
+instead of the tested modular application factory.
+
+### Error
+
+```text
+Invalid Origin requests returned HTTP 500 from the legacy CORS middleware.
+```
+
+### Context
+
+- Unit and API tests imported `server/app.js`, so they did not exercise the
+  Docker entrypoint.
+- The legacy entrypoint duplicated routes and contained a plaintext default
+  administrator fallback.
+- The candidate database was isolated correctly; no production data was
+  migrated.
+
+### Suggested Fix
+
+Keep `server.js` as a one-line compatibility import, put startup ordering in
+`server/index.js`, and test the production entrypoint source explicitly.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `server.js`, `server/index.js`,
+  `tests/smoke/runtime-entry.test.js`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T23:55:00+08:00
+- **Notes**: Added the modular runtime entry, removed the plaintext fallback,
+  secured push test endpoints, and disabled browser-scale backup operations.
+
+---
+
 ## [ERR-20260613-008] backup-root-ownership
 
 **Logged**: 2026-06-13T23:08:00+08:00

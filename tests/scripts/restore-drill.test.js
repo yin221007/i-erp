@@ -7,7 +7,10 @@ const restoreScriptUrl = new URL(
   '../../scripts/restore-drill.sh',
   import.meta.url
 );
-const serverUrl = new URL('../../server.js', import.meta.url);
+const backupRouteUrl = new URL(
+  '../../server/routes/backup.js',
+  import.meta.url
+);
 
 test('restore drill rejects backups without completion and checksum validation', async () => {
   const source = await readFile(restoreScriptUrl, 'utf8');
@@ -40,8 +43,9 @@ test('restore drill is valid Bash syntax', () => {
 });
 
 test('backend no longer contains live TRUNCATE restore logic', async () => {
-  const source = await readFile(serverUrl, 'utf8');
+  const source = await readFile(backupRouteUrl, 'utf8');
 
   assert.doesNotMatch(source, /TRUNCATE TABLE/);
-  assert.match(source, /app\.post\('\/backup\/import'[\s\S]*410/);
+  assert.match(source, /\/backup\/import/);
+  assert.match(source, /status\(410\)/);
 });

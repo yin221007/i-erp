@@ -22,6 +22,10 @@ const RESOURCE_DEFINITIONS = Object.freeze({
   recycle_bin: Object.freeze({ read: 'authenticated', write: 'admin' })
 });
 
+export const RESOURCE_NAMES = Object.freeze(
+  Object.keys(RESOURCE_DEFINITIONS)
+);
+
 function isAdministrator(user) {
   return user?.isDefaultAdmin === true || user?.role === 'Admin';
 }
