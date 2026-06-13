@@ -13,6 +13,10 @@ const engineeringArchivesUrl = new URL(
   '../../components/EngineeringArchives.tsx',
   import.meta.url
 );
+const paymentDashboardUrl = new URL(
+  '../../components/PaymentDashboard.tsx',
+  import.meta.url
+);
 
 test('API client includes cookies and handles unauthorized sessions centrally', async () => {
   const source = await readFile(apiClientUrl, 'utf8');
@@ -52,4 +56,18 @@ test('engineering archives use inline preview URLs and explicit download URLs', 
   assert.match(source, /download=1/);
   assert.match(source, /iframe src=\{previewItem\.url\}/);
   assert.match(source, /img src=\{previewItem\.url\}/);
+});
+
+test('payment summary cards use visible semantic hover colors', async () => {
+  const source = await readFile(paymentDashboardUrl, 'utf8');
+
+  for (const className of [
+    'hover:bg-slate-50',
+    'hover:bg-emerald-50',
+    'hover:bg-orange-50',
+    'hover:bg-primary-50'
+  ]) {
+    assert.equal(source.includes(className), true, `${className} is missing`);
+  }
+  assert.doesNotMatch(source, /hover:bg-primary-50\/20/);
 });

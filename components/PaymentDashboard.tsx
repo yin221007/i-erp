@@ -355,12 +355,12 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
       {/* 增强型统计卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10 transition-all">
           {[
-              { label: '在研项目合同总值', value: filteredPayments.reduce((acc, curr) => acc + (curr.contractAmount || 0), 0), color: 'border-slate-600', icon: JapaneseYen, trend: '合同原价累计' },
-              { label: '累计资金回笼总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.receivedAmount || 0), 0), color: 'border-emerald-500', icon: Wallet, trend: '实到资金' },
-              { label: '财务应收尾款总计', value: filteredPayments.reduce((acc, curr) => acc + calculateRemaining(curr), 0), color: 'border-orange-500', icon: AlertTriangle, trend: '风险敞口' },
-              { label: '已开票业务总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.invoicedAmount || 0), 0), color: 'border-primary-500', icon: FileCheck, trend: '票据关联额' }
+              { label: '在研项目合同总值', value: filteredPayments.reduce((acc, curr) => acc + (curr.contractAmount || 0), 0), color: 'border-slate-600', hover: 'hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/70', icon: JapaneseYen, trend: '合同原价累计' },
+              { label: '累计资金回笼总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.receivedAmount || 0), 0), color: 'border-emerald-500', hover: 'hover:bg-emerald-50 hover:border-emerald-300 dark:hover:bg-emerald-950/40', icon: Wallet, trend: '实到资金' },
+              { label: '财务应收尾款总计', value: filteredPayments.reduce((acc, curr) => acc + calculateRemaining(curr), 0), color: 'border-orange-500', hover: 'hover:bg-orange-50 hover:border-orange-300 dark:hover:bg-orange-950/40', icon: AlertTriangle, trend: '风险敞口' },
+              { label: '已开票业务总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.invoicedAmount || 0), 0), color: 'border-primary-500', hover: 'hover:bg-primary-50 hover:border-primary-300 dark:hover:bg-primary-950/40', icon: FileCheck, trend: '票据关联额' }
           ].map((stat, i) => (
-              <div key={i} className={`bg-white dark:bg-slate-800 p-8 rounded-[2.5rem] border-2 border-slate-100 dark:border-slate-700 border-l-[12px] ${stat.color} shadow-sm transition-all transform hover:scale-[1.03] hover:shadow-2xl hover:bg-primary-50/20 dark:hover:bg-primary-900/10 group cursor-default relative overflow-hidden`}>
+              <div key={i} className={`bg-white dark:bg-slate-800 p-8 rounded-[2.5rem] border-2 border-slate-100 dark:border-slate-700 border-l-[12px] ${stat.color} ${stat.hover} shadow-sm transition-all transform hover:scale-[1.03] hover:shadow-2xl group cursor-default relative overflow-hidden`}>
                   <div className="flex justify-between items-start mb-4">
                     <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] group-hover:text-primary-600 transition-colors">{stat.label}</p>
                     <stat.icon className="w-5 h-5 text-slate-300 group-hover:text-primary-400 transition-all" />
