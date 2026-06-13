@@ -1,25 +1,21 @@
 
 import React, { useState, useRef } from 'react';
 import { AppSettings } from '../types';
-import { X, Upload, Save, Image as ImageIcon, Sparkles, Database, Download, AlertTriangle, RefreshCw, Globe, Link as LinkIcon } from 'lucide-react';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { X, Save, Image as ImageIcon, Sparkles, Database, ShieldCheck, Link as LinkIcon } from 'lucide-react';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface SystemSettingsProps {
   isOpen: boolean;
   onClose: () => void;
   settings: AppSettings;
   onSave: (settings: AppSettings) => void;
-  onExportBackup?: () => void;
-  onImportBackup?: (file: File) => void;
 }
 
-const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settings, onSave, onExportBackup, onImportBackup }) => {
+const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settings, onSave }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [isUploading, setIsUploading] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'visual' | 'data'>('visual');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const backupInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -30,7 +26,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+        const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
         setLocalSettings(prev => ({ ...prev, logoUrl: fileData.url }));
@@ -40,12 +36,6 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
         setIsUploading(false);
       }
     }
-  };
-
-  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file && onImportBackup) onImportBackup(file);
-      if (e.target) e.target.value = '';
   };
 
   const handleSaveSettings = () => {
@@ -106,13 +96,17 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
                 <div className="bg-orange-50 dark:bg-orange-950/20 p-8 rounded-[2rem] border-2 border-orange-100 dark:border-orange-900/50">
                     <div className="flex items-start gap-5 mb-8">
                         <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-orange-200"><Database className="w-6 h-6 text-orange-600" /></div>
-                        <div><h5 className="font-black text-slate-800 dark:text-white uppercase tracking-widest">系统容灾中心</h5><p className="text-xs text-orange-600 mt-1 font-medium leading-relaxed">支持一键打包全站数据。恢复操作将覆盖所有实时记录，请谨慎操作。</p></div>
+                        <div><h5 className="font-black text-slate-800 dark:text-white uppercase tracking-widest">系统容灾中心</h5><p className="text-xs text-orange-600 mt-1 font-medium leading-relaxed">服务器执行自动备份、校验与隔离恢复演练，浏览器覆盖恢复已停用。</p></div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <button onClick={onExportBackup} className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 p-6 rounded-[1.5rem] flex flex-col items-center gap-3 hover:border-primary-500 hover:shadow-xl transition-all active:scale-95 group"><Download className="w-8 h-8 text-primary-500 group-hover:scale-110 transition-transform" /><span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-200">生成全库备份</span></button>
-                        <button onClick={() => backupInputRef.current?.click()} className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 p-6 rounded-[1.5rem] flex flex-col items-center gap-3 hover:border-red-500 hover:shadow-xl transition-all active:scale-95 group"><RefreshCw className="w-8 h-8 text-red-500 group-hover:rotate-180 transition-all duration-700" /><span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-200">从备份恢复数据</span><input type="file" ref={backupInputRef} className="hidden" accept=".json" onChange={handleImportFileChange} /></button>
+                    <div className="rounded-3xl border-2 border-emerald-100 bg-white p-6 dark:border-emerald-900/50 dark:bg-slate-800">
+                        <div className="flex items-center gap-4">
+                            <ShieldCheck className="h-9 w-9 text-emerald-500" />
+                            <div>
+                                <p className="text-sm font-black text-slate-700 dark:text-slate-100">自动备份策略已由服务器管理</p>
+                                <p className="mt-1 text-xs font-medium leading-relaxed text-slate-500">每日备份保留 7 份，升级快照保留 3 份，总空间上限 500 GB。恢复仅在维护窗口按校验流程执行。</p>
+                            </div>
+                        </div>
                     </div>
-                    <div className="mt-8 pt-6 border-t border-orange-100 dark:border-orange-900/50 flex items-center gap-3 text-[9px] font-black text-orange-400 uppercase tracking-[0.2em]"><AlertTriangle className="w-4 h-4" /> 恢复过程中请勿切断服务器连接</div>
                 </div>
             </section>
           )}

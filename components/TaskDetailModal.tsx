@@ -2,8 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { WorkflowNode, TaskStatus, Attachment, Memo, ArchiveItem, ArchiveCategory, User } from '../types';
 import { X, Upload, File as FileIcon, Send, Trash2, CheckCircle, Clock, AlertTriangle, FolderInput, Edit2, Save, Loader2, User as UserIcon, Calendar, CheckCircle2, History, FileText, RefreshCw } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface TaskDetailModalProps {
   node: WorkflowNode;
@@ -96,7 +95,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ node, isOpen, onClose
           const formData = new FormData();
           formData.append('file', file);
 
-          const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+          const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
           if (!uploadRes.ok) throw new Error('Upload failed');
           const fileData = await uploadRes.json();
           const fileUrl = fileData.url;

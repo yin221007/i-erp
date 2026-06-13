@@ -3,8 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DocItem, User } from '../types';
 import { Search, FileText, Download, Eye, BookOpen, Plus, X, Upload, Save, File as FileIcon, Trash2, AlertCircle, Filter, Edit3, Globe, Layers, CheckCircle2, Link as LinkIcon, FileCode } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface DocumentationProps {
   docs: DocItem[];
@@ -90,7 +89,7 @@ const Documentation: React.FC<DocumentationProps> = ({ docs, onAddDoc, onUpdateD
           const formData = new FormData();
           formData.append('file', uploadData.file);
           
-          const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+          const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
           if (!uploadRes.ok) throw new Error('Upload failed');
           const fileData = await uploadRes.json();
           

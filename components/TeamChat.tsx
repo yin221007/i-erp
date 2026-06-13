@@ -3,8 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ChatMessage, ChatChannel, User, Project, Attachment, MessageType, ChatAnnouncement } from '../types';
 import { Send, Hash, Users, MessageSquare, Plus, Search, Paperclip, X, Image as ImageIcon, FileText, Lock, Settings, User as UserIcon, Trash2, Download, ChevronLeft, Smile, FileDown, Pin, Megaphone, MoreVertical, ShieldCheck, Check, ChevronDown } from 'lucide-react';
 import { formatBeijingTime, MAX_FILE_SIZE } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 // Common Emojis List
 const EMOJIS = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '🙃', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '温暖', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '👍', '👎', '👏', '🤝', '👌', '✌️', '👊', '✊', '👋', '💪', '🙏', '💍', '💄', '💋', '💎', '❤️', '💔', '⭐', '💥', '🔥', '💧', '💤', '🎶', '☀️', '🌙', '🌈', '🌏', '📱', '💻', '📷', '📹', '📺', '📻', '📢', '🔔', '🔓', '🔒', '🔑', '🔨', '🔧', '⚙️', '🛒', '🎁', '🎈', '🎉', '🎊', '📅', '📋', '📌', '📎', '📊', '📈', '📉', '✉️', '📦', '📧', '📥', '📤'];
@@ -275,7 +274,7 @@ const TeamChat: React.FC<TeamChatProps> = ({
       try {
           const formData = new FormData();
           formData.append('file', file);
-          const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+          const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
           if (!uploadRes.ok) throw new Error('Upload failed');
           const fileData = await uploadRes.json();
           

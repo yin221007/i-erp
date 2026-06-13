@@ -4,8 +4,6 @@ import { Project, User, Client, Approval } from '../types';
 import { DEPARTMENTS } from '../constants';
 import { Search, Plus, Calendar, Building2, User as UserIcon, ArrowLeft, ArrowRight, Upload, X, Trash2, Edit2, Download, Lock, Filter } from 'lucide-react';
 
-const API_URL = (window as any)._env_?.API_URL || '/api';
-
 interface ProjectListProps {
   projects: Project[];
   users: User[];

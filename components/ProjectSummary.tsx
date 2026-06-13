@@ -4,8 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } 
 import { WorkflowNode, TaskStatus, Project, ArchiveItem } from '../types';
 import { CheckCircle2, Clock, AlertCircle, FileText, Edit2, Save, X, Calendar, Sparkles, Loader2, Target, Zap } from 'lucide-react';
 import { fetchAiModels, streamAiChat } from '../lib/ai-client';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL } from '../lib/api';
 
 interface ProjectSummaryProps {
   project: Project;

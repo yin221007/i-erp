@@ -1,9 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Equipment, User } from '../types';
 import { Plus, Search, Zap, Ruler, Settings, Tag, Trash2, Image as ImageIcon, Upload, X, Edit2, Eye, Download } from 'lucide-react';
-
-// Helper to get API URL
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface EquipmentLibraryProps {
   equipmentList: Equipment[];
@@ -53,7 +51,7 @@ const EquipmentLibrary: React.FC<EquipmentLibraryProps> = ({ equipmentList, onAd
         const formData = new FormData();
         formData.append('file', file);
 
-        const uploadRes = await fetch(`${API_URL}/upload`, {
+        const uploadRes = await apiFetch(`${API_URL}/upload`, {
             method: 'POST',
             body: formData
         });

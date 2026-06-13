@@ -46,8 +46,12 @@ import UserPreferencesModal from './components/UserPreferencesModal';
 import AICenter from './components/AICenter';
 import RecycleBin from './components/RecycleBin';
 import { normalizeProductionRecord } from './lib/production-records.js';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import {
+  API_URL,
+  apiFetch,
+  apiJson,
+  setUnauthorizedHandler
+} from './lib/api';
 
 function App() {
   // ==================================================================================
@@ -118,37 +122,14 @@ function App() {
       return INITIAL_SETTINGS;
   });
 
-  const [userPrefs, setUserPrefs] = useState<UserPreferences>(() => {
-      const savedUserId = localStorage.getItem('ierp_current_user_id');
-      if (savedUserId) {
-          const cached = localStorage.getItem(`ierp_prefs_${savedUserId}`);
-          if (cached) {
-              try { return { ...INITIAL_USER_PREFS, ...JSON.parse(cached) }; } catch(e) {}
-          }
-      }
-      return INITIAL_USER_PREFS;
-  }); 
+  const [userPrefs, setUserPrefs] = useState<UserPreferences>(INITIAL_USER_PREFS);
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const lastNotificationRef = useRef<{ id: string, time: number }>({ id: '', time: 0 });
   const lastNotifiedMessageIdRef = useRef<string>('');
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-      return !!localStorage.getItem('ierp_current_user_id');
-  });
-
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-      const savedUserId = localStorage.getItem('ierp_current_user_id');
-      const savedUsers = localStorage.getItem('ierp_users');
-      if (savedUserId && savedUsers) {
-          try {
-              const uList = JSON.parse(savedUsers);
-              const found = uList.find((u: any) => u.id === savedUserId);
-              if (found) return found;
-          } catch(e) {}
-      }
-      return INITIAL_USERS[0];
-  }); 
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User>(INITIAL_USERS[0]);
   
   const stateRef = useRef({ currentUser, activeView, activeChannelId });
   useEffect(() => {
@@ -203,7 +184,46 @@ function App() {
   }, [isAuthenticated, connectionStatus]);
 
   useEffect(() => {
-    fetchData();
+    const clearSession = () => {
+      setIsAuthenticated(false);
+      setCurrentUser(INITIAL_USERS[0]);
+      setConnectionStatus('offline');
+    };
+    setUnauthorizedHandler(clearSession);
+
+    const restoreSession = async () => {
+      try {
+        const { user } = await apiJson<{ user: User }>(`${API_URL}/auth/me`);
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+        if (user.preferences) {
+          setUserPrefs({
+            ...INITIAL_USER_PREFS,
+            ...user.preferences
+          });
+        } else {
+          const cachedPreferences = localStorage.getItem(`ierp_prefs_${user.id}`);
+          if (!cachedPreferences) {
+            await fetchData(user.id);
+            return;
+          }
+          try {
+            setUserPrefs({
+              ...INITIAL_USER_PREFS,
+              ...JSON.parse(cachedPreferences)
+            });
+          } catch {
+            setUserPrefs(INITIAL_USER_PREFS);
+          }
+        }
+        await fetchData(user.id);
+      } catch {
+        clearSession();
+        setIsLoaded(true);
+      }
+    };
+    restoreSession();
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   useEffect(() => {
@@ -329,14 +349,12 @@ function App() {
   const syncToBackend = async (resource: string, method: string, data: any, id?: string) => {
       try {
           const url = id ? `${API_URL}/${resource}/${id}` : `${API_URL}/${resource}`;
-          const activeId = localStorage.getItem('ierp_current_user_id') || currentUser.id;
-          const headers: Record<string, string> = {
-              'Content-Type': 'application/json',
-              'x-user-id': activeId 
-          };
-          
-          const options: RequestInit = { method, headers, body: JSON.stringify(data) };
-          const res = await fetch(url, options);
+          const res = await apiFetch(url, {
+              method,
+              ...(method === 'DELETE' && Object.keys(data || {}).length === 0
+                ? {}
+                : { json: data })
+          });
           if (!res.ok) {
               if (res.status === 403) {
                   const errData = await res.json().catch(() => ({}));
@@ -351,30 +369,6 @@ function App() {
           console.error(`[Sync Engine] Fatal for ${resource}:`, error);
           throw error;
       }
-  };
-
-  const checkAuth = (currentUsersList: User[]) => {
-    const savedUserId = localStorage.getItem('ierp_current_user_id');
-    if (savedUserId) {
-        const found = currentUsersList.find(u => u.id === savedUserId);
-        if (found) {
-            setCurrentUser(found);
-            setIsAuthenticated(true);
-            
-            if (found.lastReadMap) {
-                setChatLastReadMap(found.lastReadMap);
-                localStorage.setItem(`ierp_chat_read_${found.id}`, JSON.stringify(found.lastReadMap));
-            }
-
-            if (found.preferences) {
-                setUserPrefs(found.preferences);
-                localStorage.setItem(`ierp_prefs_${found.id}`, JSON.stringify(found.preferences));
-            }
-        } else {
-            localStorage.removeItem('ierp_current_user_id');
-            setIsAuthenticated(false);
-        }
-    }
   };
 
   const handleProtectedDelete = async (item: any, resourceType: string, itemName: string, deleteCallback: (id: string) => void) => {
@@ -424,42 +418,31 @@ function App() {
   // 5. DATA FETCHING & POLLING
   // ==================================================================================
 
-  const ensureAdminExists = (userList: User[]) => {
-      const hasAdmin = userList.some(u => u.nickname === 'admin' || u.id === 'u-1');
-      if (!hasAdmin) {
-          const defaultAdmin = { ...INITIAL_USERS[0] }; 
-          return [defaultAdmin, ...userList];
-      }
-      return userList;
-  };
-
-  const fetchData = async () => {
+  const fetchData = async (authenticatedUserId = currentUser.id) => {
     setConnectionStatus('connecting');
-    const savedUserId = localStorage.getItem('ierp_current_user_id');
-    const headers: Record<string, string> = savedUserId ? { 'x-user-id': savedUserId } : {};
 
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); 
 
         const responses = await Promise.allSettled([
-            fetch(`${API_URL}/projects`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/clients`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/equipment`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/schedule`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/docs`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/archives`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/production`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/users`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/settings`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/payments`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/approvals`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/worklogs`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/messages`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/channels`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/announcements`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/ai_messages`, { signal: controller.signal, headers }),
-            fetch(`${API_URL}/recycle_bin`, { signal: controller.signal, headers })
+            apiFetch(`${API_URL}/projects`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/clients`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/equipment`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/schedule`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/docs`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/archives`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/production`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/users`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/settings`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/payments`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/approvals`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/worklogs`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/messages`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/channels`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/announcements`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/ai_messages`, { signal: controller.signal }),
+            apiFetch(`${API_URL}/recycle_bin`, { signal: controller.signal })
         ]);
         clearTimeout(timeoutId);
 
@@ -482,10 +465,25 @@ function App() {
         
         let loadedUsers = await getJson(responses[7]);
         if (Array.isArray(loadedUsers) && loadedUsers.length > 0) {
-            loadedUsers = ensureAdminExists(loadedUsers);
             setUsers(loadedUsers);
             saveToLocal('users', loadedUsers);
-            checkAuth(loadedUsers);
+            const self = loadedUsers.find((user: User) =>
+              user.id === authenticatedUserId
+            );
+            if (self) {
+                setCurrentUser(self);
+                if (self.lastReadMap) setChatLastReadMap(self.lastReadMap);
+                if (self.preferences) {
+                    setUserPrefs({
+                      ...INITIAL_USER_PREFS,
+                      ...self.preferences
+                    });
+                    localStorage.setItem(
+                      `ierp_prefs_${self.id}`,
+                      JSON.stringify(self.preferences)
+                    );
+                }
+            }
         }
         
         const loadedClients = await getJson(responses[1]);
@@ -555,8 +553,6 @@ function App() {
       if (connectionStatus !== 'connected' || !isAuthenticated) return;
       
       try {
-          const headers: Record<string, string> = { 'x-user-id': currentU.id };
-
           const now = Date.now();
           if (now - lastHeartbeatRef.current > 45000) {
               lastHeartbeatRef.current = now;
@@ -565,11 +561,10 @@ function App() {
               });
           }
 
-          const usersRes = await fetch(`${API_URL}/users`, { headers });
+          const usersRes = await apiFetch(`${API_URL}/users`);
           if (usersRes.ok) {
               let serverUsers = await safeJson(usersRes);
               if (Array.isArray(serverUsers) && serverUsers.length > 0) {
-                  serverUsers = ensureAdminExists(serverUsers);
                   setUsers(serverUsers);
                   saveToLocal('users', serverUsers);
                   const self = serverUsers.find((u: User) => u.id === currentU.id);
@@ -579,21 +574,21 @@ function App() {
               }
           }
 
-          const msgRes = await fetch(`${API_URL}/messages`, { headers });
+          const msgRes = await apiFetch(`${API_URL}/messages`);
           if (msgRes.ok) {
               const serverMessages = await safeJson(msgRes);
               if (Array.isArray(serverMessages)) setMessages(serverMessages);
           }
           
           const [channelRes, annRes, workLogRes, paymentRes, approvalRes, projRes, aiRes, recycleRes] = await Promise.all([
-              fetch(`${API_URL}/channels`, { headers }),
-              fetch(`${API_URL}/announcements`, { headers }),
-              fetch(`${API_URL}/worklogs`, { headers }),
-              fetch(`${API_URL}/payments`, { headers }),
-              fetch(`${API_URL}/approvals`, { headers }),
-              fetch(`${API_URL}/projects`, { headers }),
-              fetch(`${API_URL}/ai_messages`, { headers }),
-              fetch(`${API_URL}/recycle_bin`, { headers })
+              apiFetch(`${API_URL}/channels`),
+              apiFetch(`${API_URL}/announcements`),
+              apiFetch(`${API_URL}/worklogs`),
+              apiFetch(`${API_URL}/payments`),
+              apiFetch(`${API_URL}/approvals`),
+              apiFetch(`${API_URL}/projects`),
+              apiFetch(`${API_URL}/ai_messages`),
+              apiFetch(`${API_URL}/recycle_bin`)
           ]);
 
           if (channelRes.ok) {
@@ -973,9 +968,8 @@ function App() {
 
   const handleRestoreRecycleItem = async (id: string) => {
       try {
-          await fetch(`${API_URL}/recycle_bin/restore/${id}`, {
-              method: 'POST',
-              headers: { 'x-user-id': currentUser.id }
+          await apiFetch(`${API_URL}/recycle_bin/restore/${id}`, {
+              method: 'POST'
           });
           notify('数据已成功恢复', 'success');
           fetchData();
@@ -984,9 +978,8 @@ function App() {
 
   const handlePermanentDeleteRecycleItem = async (id: string) => {
       try {
-          await fetch(`${API_URL}/recycle_bin/${id}`, {
-              method: 'DELETE',
-              headers: { 'x-user-id': currentUser.id }
+          await apiFetch(`${API_URL}/recycle_bin/${id}`, {
+              method: 'DELETE'
           });
           notify('数据已永久删除', 'info');
           fetchData();
@@ -996,48 +989,12 @@ function App() {
   const handleEmptyRecycleBin = async () => {
       if (!window.confirm("确定要彻底清空回收站吗？")) return;
       try {
-          await fetch(`${API_URL}/recycle_bin/empty/all`, {
-              method: 'DELETE',
-              headers: { 'x-user-id': currentUser.id }
+          await apiFetch(`${API_URL}/recycle_bin/empty/all`, {
+              method: 'DELETE'
           });
           notify('回收站已清空', 'success');
           fetchData();
       } catch (e) { notify('清空失败', 'error'); }
-  };
-
-  const handleExportBackup = async () => {
-    try {
-        notify('正在准备备份...', 'info');
-        const res = await fetch(`${API_URL}/backup/export`, { headers: { 'x-user-id': currentUser.id } });
-        const backupData = await res.json();
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `iERP_Backup_${new Date().toISOString().split('T')[0]}.json`;
-        link.click();
-        notify('备份已下载', 'success');
-    } catch (e) { notify('导出失败', 'error'); }
-  };
-
-  const handleImportBackup = async (file: File) => {
-    if (!window.confirm("导入备份将覆盖所有当前数据！确定吗？")) return;
-    try {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const content = e.target?.result as string;
-            const res = await fetch(`${API_URL}/backup/import`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
-                body: content
-            });
-            if (res.ok) {
-                notify('还原成功，即将刷新', 'success');
-                setTimeout(() => window.location.reload(), 2000);
-            }
-        };
-        reader.readAsText(file);
-    } catch (e) { notify('解析出错', 'error'); }
   };
 
   const handleSendAiMessage = (msg: any) => {
@@ -1063,14 +1020,14 @@ function App() {
       const now = new Date().toISOString();
       setChatLastReadMap(prev => {
           const updated = { ...prev, [channelId]: now };
-          setCurrentUser(curr => {
-              const updatedUser = { ...curr, lastReadMap: updated };
-              syncToBackend('users', 'PUT', updatedUser, updatedUser.id);
-              return updatedUser;
-          });
+          setCurrentUser(curr => ({ ...curr, lastReadMap: updated }));
+          apiJson(`${API_URL}/auth/me`, {
+              method: 'PATCH',
+              json: { lastReadMap: updated }
+          }).catch(() => notify('聊天已读状态同步失败', 'error'));
           return updated;
       });
-  }, [currentUser.id]);
+  }, []);
 
   const handleSaveSettings = async (newSettings: AppSettings) => {
     setAppSettings(newSettings);
@@ -1085,15 +1042,25 @@ function App() {
       const updatedUser = { ...currentUser, preferences: newPrefs };
       setCurrentUser(updatedUser);
       try {
-          await syncToBackend('users', 'PUT', updatedUser, updatedUser.id);
+          await apiJson(`${API_URL}/auth/me`, {
+              method: 'PATCH',
+              json: { preferences: newPrefs }
+          });
+          localStorage.setItem(
+            `ierp_prefs_${currentUser.id}`,
+            JSON.stringify(newPrefs)
+          );
           notify('偏好设置已同步', 'success');
       } catch (e) { notify('同步失败', 'error'); }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('ierp_current_user_id');
+  const handleLogout = async () => {
+    try {
+      await apiFetch(`${API_URL}/auth/logout`, { method: 'POST' });
+    } catch {}
     setIsAuthenticated(false);
     setCurrentUser(INITIAL_USERS[0]);
+    setConnectionStatus('offline');
     notify('已退出', 'info');
   };
 
@@ -1124,15 +1091,22 @@ function App() {
     }).length;
   }, [approvals, currentUser.id, isAuthenticated]);
 
+  if (!isLoaded) {
+      return (
+          <div className="min-h-[100dvh] flex items-center justify-center bg-slate-100">
+              <div className="text-sm font-black text-slate-400">正在验证会话...</div>
+          </div>
+      );
+  }
+
   if (!isAuthenticated) {
       return (
           <Login 
-              users={users} 
               onLogin={(u) => { 
-                  localStorage.setItem('ierp_current_user_id', u.id); 
                   setCurrentUser(u); 
                   setIsAuthenticated(true); 
-                  fetchData(); 
+                  setConnectionStatus('connecting');
+                  fetchData(u.id);
               }} 
               appName={appSettings?.appName} 
               logoUrl={appSettings?.logoUrl} 
@@ -1195,7 +1169,7 @@ function App() {
             {activeView === 'recycle_bin' && <RecycleBin items={recycleBin} currentUser={currentUser} onRestore={handleRestoreRecycleItem} onPermanentDelete={handlePermanentDeleteRecycleItem} onEmpty={handleEmptyRecycleBin} />}
         </main>
       </div>
-      <SystemSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={appSettings} onSave={handleSaveSettings} onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} />
+      <SystemSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={appSettings} onSave={handleSaveSettings} />
       <UserPreferencesModal isOpen={isUserPrefsOpen} onClose={() => setIsUserPrefsOpen(false)} preferences={userPrefs} onSave={handleSaveUserPrefs} />
     </div>
   );

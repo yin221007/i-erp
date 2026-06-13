@@ -3,8 +3,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Approval, ApprovalStatus, ApprovalType, User, Attachment, ApprovalStrategy, ApprovalOutcome, ApprovalTemplate } from '../types';
 import { Plus, Search, FileText, CheckCircle2, XCircle, RotateCcw, Upload, Paperclip, History, Trash2, Send, ChevronRight, Users, UserCheck, FastForward, ListChecks, BellRing, BookOpen, Layers, Zap, MoreHorizontal, Copy } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 // 预设审批模版
 const PRESET_TEMPLATES: ApprovalTemplate[] = [
@@ -158,7 +157,7 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
       setIsUploading(true);
       try {
           const fd = new FormData(); fd.append('file', e.target.files[0]);
-          const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: fd });
+          const res = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: fd });
           const file = await res.json();
           setFormAttachments(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), name: e.target.files![0].name, url: file.url, uploadDate: new Date().toISOString(), type: 'FILE', size: 'N/A' }]);
       } finally { setIsUploading(false); }

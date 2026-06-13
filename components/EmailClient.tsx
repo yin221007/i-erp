@@ -3,8 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Mail, Send, RefreshCw, Settings, PenSquare, X, Save, Eye, Paperclip, ChevronLeft, ChevronRight, Inbox, Check, Download, FileText, FileSpreadsheet, ArrowRight, ShieldAlert, Globe, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
 import { User, EmailConfig, EmailMessage } from '../types';
 import { formatBeijingTime } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface EmailClientProps {
   currentUser: User;
@@ -48,9 +47,7 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
 
   const fetchConfig = async () => {
       try {
-          const res = await fetch(`${API_URL}/email_configs`, {
-              headers: { 'x-user-id': currentUser.id }
-          });
+          const res = await apiFetch(`${API_URL}/email_configs`);
           if (res.ok) {
               const data = await res.json();
               const myConfig = data.find((c: EmailConfig) => c.id === currentUser.id);
@@ -85,8 +82,7 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时
 
-          const res = await fetch(`${API_URL}/email/fetch`, {
-              headers: { 'x-user-id': currentUser.id },
+          const res = await apiFetch(`${API_URL}/email/fetch`, {
               signal: controller.signal
           });
           
@@ -126,13 +122,9 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
       const url = config ? `${API_URL}/email_configs/${currentUser.id}` : `${API_URL}/email_configs`;
 
       try {
-          const res = await fetch(url, {
+          const res = await apiFetch(url, {
               method,
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'x-user-id': currentUser.id 
-              },
-              body: JSON.stringify(settingForm)
+              json: settingForm
           });
 
           if (res.ok) {
@@ -157,17 +149,13 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
       }
       setIsSending(true);
       try {
-          const res = await fetch(`${API_URL}/email/send`, {
+          const res = await apiFetch(`${API_URL}/email/send`, {
               method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'x-user-id': currentUser.id
-              },
-              body: JSON.stringify({
+              json: {
                   to: composeTo,
                   subject: composeSubject,
                   text: composeBody
-              })
+              }
           });
           if (res.ok) {
               alert("业务函件已成功发出");
@@ -190,7 +178,7 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
   const handleDownloadAttachment = async (att: any) => {
       if (!selectedMessage) return;
       try {
-          const res = await fetch(
+          const res = await apiFetch(
               `${API_URL}/email/messages/${encodeURIComponent(selectedMessage.id)}/attachments/${encodeURIComponent(att.part)}`
           );
           if (!res.ok) throw new Error('Attachment download failed');
@@ -220,7 +208,7 @@ const EmailClient: React.FC<EmailClientProps> = ({ currentUser }) => {
       setIsLoadingMessage(true);
       setErrorMessage(null);
       try {
-          const res = await fetch(
+          const res = await apiFetch(
               `${API_URL}/email/messages/${encodeURIComponent(msg.id)}`
           );
           if (!res.ok) {

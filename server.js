@@ -22,7 +22,15 @@ const app = express();
 const PORT = config.port;
 
 app.set('trust proxy', config.trustProxy);
-app.use(cors());
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin || config.publicOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error('Origin is not allowed'));
+    },
+    credentials: true
+}));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
@@ -155,6 +163,7 @@ app.use(createEmailRouter({
 
 // --- 推送测试路由 ---
 app.post('/push/test', async (req, res) => {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
     const { type, config } = req.body;
     const title = "i ERP 推送连接测试";
     const content = `恭喜！您的 ${type} 推送通道已成功建立连接。\n测试时间：${new Date().toLocaleString('zh-CN')}`;

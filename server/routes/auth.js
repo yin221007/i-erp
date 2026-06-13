@@ -23,8 +23,33 @@ export function toSafeUser(user) {
     isDefaultAdmin: user.isDefaultAdmin === true,
     avatar: user.avatar || '',
     lastReadMap: user.lastReadMap,
-    lastActive: user.lastActive
+    lastActive: user.lastActive,
+    preferences: user.preferences
   };
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeLastReadMap(value) {
+  if (!isRecord(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > 500) return null;
+
+  const normalized = {};
+  for (const [channelId, timestamp] of entries) {
+    if (
+      channelId.length === 0 ||
+      channelId.length > 200 ||
+      typeof timestamp !== 'string' ||
+      timestamp.length > 100
+    ) {
+      return null;
+    }
+    normalized[channelId] = timestamp;
+  }
+  return normalized;
 }
 
 function createLoginLimiter({
@@ -105,6 +130,44 @@ export function createAuthRouter({ pool, loginLimiter = createLoginLimiter() }) 
 
   router.get('/me', requireAuth, (req, res) => {
     res.json({ user: toSafeUser(req.authUser) });
+  });
+
+  router.patch('/me', requireAuth, async (req, res, next) => {
+    try {
+      const updates = {};
+      if ('preferences' in req.body) {
+        if (!isRecord(req.body.preferences)) {
+          return res.status(400).json({ error: 'Preferences must be an object' });
+        }
+        updates.preferences = req.body.preferences;
+      }
+      if ('lastReadMap' in req.body) {
+        const lastReadMap = normalizeLastReadMap(req.body.lastReadMap);
+        if (!lastReadMap) {
+          return res.status(400).json({ error: 'Invalid chat read state' });
+        }
+        updates.lastReadMap = lastReadMap;
+      }
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: 'No supported profile fields' });
+      }
+
+      const updatedUser = { ...req.authUser, ...updates };
+      const [result] = await pool.query(
+        `UPDATE users
+        SET json_data = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+        [JSON.stringify(updatedUser), req.authUser.id]
+      );
+      if (result.affectedRows !== 1) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      req.authUser = updatedUser;
+      return res.json({ user: toSafeUser(updatedUser) });
+    } catch (error) {
+      next(error);
+    }
   });
 
   router.post('/logout', requireAuth, async (req, res, next) => {

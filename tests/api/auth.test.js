@@ -87,6 +87,13 @@ class FakeAuthPool {
       return [{ affectedRows: session ? 1 : 0 }, []];
     }
 
+    if (normalized.startsWith('UPDATE users SET json_data')) {
+      const [jsonData, userId] = parameters;
+      if (!this.users.has(userId)) return [{ affectedRows: 0 }, []];
+      this.users.set(userId, JSON.parse(jsonData));
+      return [{ affectedRows: 1 }, []];
+    }
+
     throw new Error(`Unexpected SQL in fake auth pool: ${normalized}`);
   }
 }
@@ -97,16 +104,36 @@ const config = {
 };
 
 async function createAuthTestApp() {
-  const password = await hashPassword('password');
-  const pool = new FakeAuthPool([{
-    id: 'u-1',
-    nickname: 'admin',
-    password,
-    department: '总经办',
-    role: 'Admin',
-    isDefaultAdmin: true,
-    avatar: ''
-  }]);
+  const [adminPassword, memberPassword] = await Promise.all([
+    hashPassword('password'),
+    hashPassword('member-password')
+  ]);
+  const pool = new FakeAuthPool([
+    {
+      id: 'u-1',
+      nickname: 'admin',
+      password: adminPassword,
+      department: '总经办',
+      role: 'Admin',
+      isDefaultAdmin: true,
+      avatar: ''
+    },
+    {
+      id: 'u-2',
+      nickname: 'member',
+      password: memberPassword,
+      department: '工程部',
+      role: 'User',
+      isDefaultAdmin: false,
+      avatar: '',
+      preferences: {
+        enableBrowser: true,
+        webhooks: {
+          pushPlusToken: 'existing-secret'
+        }
+      }
+    }
+  ]);
   return { app: createApp({ pool, config }), pool };
 }
 
@@ -179,4 +206,57 @@ test('login failures are rate limited by username and client address', async () 
     .post('/auth/login')
     .send({ username: 'admin', password: 'wrong' })
     .expect(429);
+});
+
+test('a user can update only their own profile preferences and read state', async () => {
+  const { app, pool } = await createAuthTestApp();
+  const login = await request(app)
+    .post('/auth/login')
+    .send({ username: 'member', password: 'member-password' })
+    .expect(200);
+  const cookie = sessionCookie(login);
+
+  assert.equal(
+    login.body.user.preferences.webhooks.pushPlusToken,
+    'existing-secret'
+  );
+
+  const response = await request(app)
+    .patch('/auth/me')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      id: 'u-1',
+      role: 'Admin',
+      isDefaultAdmin: true,
+      password: 'replacement',
+      preferences: {
+        enableBrowser: false,
+        webhooks: {
+          pushPlusToken: 'updated-secret'
+        }
+      },
+      lastReadMap: {
+        general: '2026-06-13T12:00:00.000Z'
+      }
+    })
+    .expect(200);
+
+  assert.equal(response.body.user.id, 'u-2');
+  assert.equal(response.body.user.role, 'User');
+  assert.equal(response.body.user.preferences.enableBrowser, false);
+  assert.equal(
+    response.body.user.preferences.webhooks.pushPlusToken,
+    'updated-secret'
+  );
+  assert.equal(
+    response.body.user.lastReadMap.general,
+    '2026-06-13T12:00:00.000Z'
+  );
+
+  const stored = pool.users.get('u-2');
+  assert.equal(stored.role, 'User');
+  assert.equal(stored.isDefaultAdmin, false);
+  assert.notEqual(stored.password, 'replacement');
+  assert.equal(stored.preferences.webhooks.pushPlusToken, 'updated-secret');
 });

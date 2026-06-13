@@ -2,8 +2,7 @@ import React, { useState, useRef } from 'react';
 import { User, UserRole, UserPermission } from '../types';
 import { Search, Plus, Edit2, Trash2, Save, X, Shield, User as UserIcon, Building2, Upload, Lock, Users } from 'lucide-react';
 import { DEPARTMENTS } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface UserManagerProps {
   users: User[];
@@ -79,7 +78,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       try {
         const data = new FormData();
         data.append('file', file);
-        const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: data });
+        const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: data });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
         setFormData(prev => ({ ...prev, avatar: fileData.url }));

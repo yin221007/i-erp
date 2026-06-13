@@ -4,8 +4,7 @@ import { Sparkles, Send, Trash2, BrainCircuit, Bot, User as UserIcon, Loader2, X
 import { formatBeijingTime } from '../constants';
 import { User, Attachment, AIModel } from '../types';
 import { fetchAiModels, streamAiChat } from '../lib/ai-client';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface AICenterProps {
   currentUser: User;
@@ -133,7 +132,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+        const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
 

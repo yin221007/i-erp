@@ -2,8 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { ArchiveItem, ArchiveCategory, Project, User } from '../types';
 import { Search, FileText, FileCode, FileSpreadsheet, FileImage, Paperclip, FolderOpen, Eye, Download, X, Upload, Save, File as FileIcon, Trash2, ArrowUp, ArrowDown, ArrowUpDown, AlertCircle } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface EngineeringArchivesProps {
   archives: ArchiveItem[];
@@ -122,7 +121,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
         const sizeStr = (uploadData.file.size / 1024).toFixed(1) + ' KB';
         const project = projects.find(p => p.id === uploadData.projectId);
         const formData = new FormData(); formData.append('file', uploadData.file);
-        const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+        const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
         const newArchive: ArchiveItem = { 

@@ -1,7 +1,8 @@
 import { AIModel } from '../types';
+import { apiFetch } from './api';
 
 export async function fetchAiModels(apiUrl: string): Promise<AIModel[]> {
-  const response = await fetch(`${apiUrl}/ai/models`);
+  const response = await apiFetch(`${apiUrl}/ai/models`);
   if (!response.ok) throw new Error('模型列表读取失败');
   const data = await response.json();
   if (!Array.isArray(data)) throw new Error('模型列表格式错误');
@@ -18,7 +19,7 @@ export async function streamAiChat(
   },
   onToken: (token: string) => void
 ) {
-  const response = await fetch(`${apiUrl}/ai/chat`, {
+  const response = await apiFetch(`${apiUrl}/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request)

@@ -2,21 +2,22 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { Lock, User as UserIcon, ArrowRight, Eye, EyeOff, Server } from 'lucide-react';
+import { API_URL, apiJson } from '../lib/api';
 
 interface LoginProps {
-  users: User[];
   onLogin: (user: User) => void;
   appName?: string;
   logoUrl?: string;
 }
 
-const Login: React.FC<LoginProps> = ({ users, onLogin, appName, logoUrl }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, appName, logoUrl }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
@@ -28,12 +29,24 @@ const Login: React.FC<LoginProps> = ({ users, onLogin, appName, logoUrl }) => {
         return;
     }
     
-    const user = users.find(u => u.nickname.toLowerCase() === cleanUsername.toLowerCase());
-    
-    if (user && user.password === cleanPassword) {
-      onLogin(user);
-    } else {
-      setError('用户名或密码错误');
+    setIsSubmitting(true);
+    try {
+      const response = await apiJson<{ user: User }>(`${API_URL}/auth/login`, {
+        method: 'POST',
+        json: {
+          username: cleanUsername,
+          password: cleanPassword
+        }
+      });
+      onLogin(response.user);
+    } catch (loginError: any) {
+      setError(
+        loginError.status === 429
+          ? '登录尝试过于频繁，请稍后重试'
+          : '用户名或密码错误'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -107,16 +120,13 @@ const Login: React.FC<LoginProps> = ({ users, onLogin, appName, logoUrl }) => {
 
            <button 
              type="submit"
+             disabled={isSubmitting}
              className="w-full bg-primary-600 text-white py-4 rounded-2xl font-black shadow-2xl shadow-primary-500/30 hover:bg-primary-700 hover:translate-y-[-2px] active:scale-[0.98] transition-all flex items-center justify-center gap-3 mt-2 group"
            >
-             立即进入系统 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+             {isSubmitting ? '正在验证...' : '立即进入系统'} <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
            </button>
            
            <div className="text-center pt-6 border-t border-slate-50 transition-all">
-             <p className="text-[10px] font-bold text-slate-300 flex flex-col gap-1 uppercase tracking-widest">
-               <span>默认管理员: <span className="text-slate-600 font-mono">admin</span></span> 
-               <span>初始密码: <span className="text-slate-600 font-mono">password</span></span>
-             </p>
              <div className="mt-4 flex justify-center items-center gap-2 text-[10px] font-black text-primary-200 transition-colors uppercase tracking-[0.2em]">
                  <Server className="w-3.5 h-3.5" />
                  <span>Security verified</span>

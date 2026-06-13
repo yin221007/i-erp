@@ -3,8 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { UserPreferences, ThemeColor, NotificationWebhooks } from '../types';
 import { X, Bell, Save, Volume2, Palette, Clock, MapPin, Settings, CheckCircle2, Globe, MessageSquare, ClipboardList, Calendar, BellRing, Smartphone, ChevronDown, ShieldCheck, Send, MessageCircle, RotateCcw, Activity } from 'lucide-react';
 import { CHINA_CITIES_DATA } from '../constants';
-
-const API_URL = (window as any)._env_?.API_URL || '/api';
+import { API_URL, apiFetch } from '../lib/api';
 
 interface UserPreferencesModalProps {
   isOpen: boolean;
@@ -51,13 +50,9 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
 
       setIsTesting(type);
       try {
-          const res = await fetch(`${API_URL}/push/test`, {
+          const res = await apiFetch(`${API_URL}/push/test`, {
               method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'x-user-id': localStorage.getItem('ierp_current_user_id') || ''
-              },
-              body: JSON.stringify({ type, config })
+              json: { type, config }
           });
           if (res.ok) {
               alert(`${type} 测试消息已发出，请在相应客户端检查。`);
