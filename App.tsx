@@ -45,6 +45,7 @@ import Login from './components/Login';
 import UserPreferencesModal from './components/UserPreferencesModal';
 import AICenter from './components/AICenter';
 import RecycleBin from './components/RecycleBin';
+import { normalizeProductionRecord } from './lib/production-records.js';
 
 const API_URL = (window as any)._env_?.API_URL || '/api';
 
@@ -503,7 +504,9 @@ function App() {
         if (loadedArchives) setArchives(loadedArchives);
 
         const loadedProduction = await getJson(responses[6]);
-        if (loadedProduction) setProductionData(loadedProduction);
+        if (Array.isArray(loadedProduction)) {
+            setProductionData(loadedProduction.map(normalizeProductionRecord));
+        }
         
         const settingsData = await getJson(responses[8]);
         if (Array.isArray(settingsData) && settingsData.length > 0) {
@@ -855,19 +858,20 @@ function App() {
   };
 
   const handleUpdateProduction = (projProd: ProjectProduction) => {
+      const normalized = normalizeProductionRecord(projProd);
       setProductionData(prev => {
-          const exists = prev.find(i => i.projectId === projProd.projectId);
-          if (exists) return prev.map(i => i.projectId === projProd.projectId ? projProd : i);
-          return [...prev, projProd];
+          const exists = prev.find(i => i.id === normalized.id);
+          if (exists) return prev.map(i => i.id === normalized.id ? normalized : i);
+          return [...prev, normalized];
       });
-      syncToBackend('production', 'POST', projProd);
+      syncToBackend('production', 'POST', normalized);
   };
 
   const handleDeleteProduction = (projectId: string) => {
       const prod = productionData.find(p => p.projectId === projectId);
       if (!prod) return;
       handleProtectedDelete(prod, 'production', prod.projectName, (id) => {
-          setProductionData(prev => prev.filter(p => p.projectId !== id));
+          setProductionData(prev => prev.filter(p => p.id !== id));
           syncToBackend('production', 'DELETE', {}, id).then(() => fetchData());
       });
   };

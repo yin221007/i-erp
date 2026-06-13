@@ -156,7 +156,7 @@ export interface ProductionUnit {
 }
 
 export interface ProjectProduction {
-  id?: string; 
+  id: string;
   projectId: string;
   projectName: string;
   projectCode: string;

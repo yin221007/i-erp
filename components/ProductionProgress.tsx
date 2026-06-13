@@ -19,7 +19,7 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
   const [formData, setFormData] = useState({ name: '', model: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status: 'Waiting' as ProductionStatus });
 
   const activeProject = projects.find(p => p.id === selectedProjectId);
-  const activeProductionData = productionData.find(p => p.projectId === selectedProjectId) || { projectId: activeProject?.id || '', projectName: activeProject?.name || '', projectCode: activeProject?.code || '', items: [] };
+  const activeProductionData = productionData.find(p => p.projectId === selectedProjectId) || { id: activeProject?.id || '', projectId: activeProject?.id || '', projectName: activeProject?.name || '', projectCode: activeProject?.code || '', items: [] };
 
   const handleColumnExport = (status: ProductionStatus) => {
       const items = activeProductionData.items.filter(i => i.status === status);
