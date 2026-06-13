@@ -90,6 +90,7 @@ services:
       DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
       DB_NAME: "${DB_NAME:-ierp}"
       DB_PORT: "${DB_PORT:-3306}"
+      DB_CLIENT_TLS: "${DB_CLIENT_TLS:-disabled}"
       BACKUP_ROOT: /backups
       UPLOADS_ROOT: /data/uploads
       DEPLOY_ROOT: /data/deploy

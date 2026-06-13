@@ -23,6 +23,7 @@ BACKUP_CAPACITY_BYTES="${BACKUP_CAPACITY_BYTES:-536870912000}"
 BACKUP_KIND="${BACKUP_KIND:-daily}"
 BACKUP_ID="${BACKUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)-${BACKUP_KIND}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/db-client-args.sh"
 
 case "$BACKUP_KIND" in
   daily|upgrade) ;;
@@ -73,6 +74,7 @@ umask 077
 mkdir "$incomplete_directory"
 
 mariadb-dump \
+  "${DB_CLIENT_ARGS[@]}" \
   --single-transaction \
   --quick \
   --routines \
@@ -99,6 +101,7 @@ while IFS= read -r table_name; do
   fi
   table_count="$(
     mariadb \
+      "${DB_CLIENT_ARGS[@]}" \
       --batch \
       --skip-column-names \
       --host="$DB_HOST" \
@@ -112,6 +115,7 @@ while IFS= read -r table_name; do
     >> "$incomplete_directory/table-counts.tsv"
 done < <(
   mariadb \
+    "${DB_CLIENT_ARGS[@]}" \
     --batch \
     --skip-column-names \
     --host="$DB_HOST" \

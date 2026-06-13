@@ -1,5 +1,88 @@
 # Errors
 
+## [ERR-20260613-007] nested-ssh-shell-expansion
+
+**Logged**: 2026-06-13T22:48:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+A nested `zsh -lc` command expanded remote checksum substitutions locally
+before SSH ran.
+
+### Error
+
+```text
+sha256sum: /volume2/docker/ierp-releases/ierp-ac4eefa-patch.tar.gz:
+No such file or directory
+```
+
+### Context
+
+- The patch upload completed, but extraction and validation did not run.
+- A read-only check confirmed the release source was still unchanged.
+
+### Suggested Fix
+
+Split upload and remote validation into separate SSH commands and keep remote
+substitutions inside one single-quoted remote script.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: deployment command only
+
+### Resolution
+
+- **Resolved**: 2026-06-13T22:50:00+08:00
+- **Notes**: Re-ran remote validation and extraction as a separate command.
+
+---
+
+## [ERR-20260613-006] mariadb-client-default-tls
+
+**Logged**: 2026-06-13T22:42:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+The Alpine MariaDB 11.4 client required TLS by default, while the legacy NAS
+database endpoint does not provide TLS.
+
+### Error
+
+```text
+TLS/SSL error: SSL is required, but the server does not support it
+```
+
+### Context
+
+- The backup container started successfully after the cgroup fix.
+- A read-only `SELECT 1` succeeded with `--skip-ssl`.
+- Backup, restore, deployment comparison, and rollback use the same client.
+
+### Suggested Fix
+
+Use one shared `DB_CLIENT_TLS` policy for every maintenance script.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `scripts/db-client-args.sh`, `scripts/backup.sh`,
+  `scripts/restore-drill.sh`, `scripts/deploy-lib.sh`, `scripts/rollback.sh`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T23:00:00+08:00
+- **Notes**: Added explicit `disabled` and `required` modes with regression
+  tests; unknown values abort.
+
+---
+
 ## [ERR-20260613-005] synology-cpu-cfs-quota
 
 **Logged**: 2026-06-13T22:30:00+08:00

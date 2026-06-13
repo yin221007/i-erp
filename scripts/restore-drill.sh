@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/db-client-args.sh"
+
 required_variables=(
   BACKUP_DIR
   DB_HOST
@@ -44,6 +47,7 @@ cleanup() {
   status=$?
   if [[ "$database_created" -eq 1 && "${KEEP_RESTORE_DB:-0}" != "1" ]]; then
     mariadb \
+      "${DB_CLIENT_ARGS[@]}" \
       --host="$DB_HOST" \
       --port="${DB_PORT:-3306}" \
       --user="$DB_USER" \
@@ -56,6 +60,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mariadb \
+  "${DB_CLIENT_ARGS[@]}" \
   --host="$DB_HOST" \
   --port="${DB_PORT:-3306}" \
   --user="$DB_USER" \
@@ -65,6 +70,7 @@ database_created=1
 
 gzip -dc "$BACKUP_DIR/database.sql.gz" |
   mariadb \
+    "${DB_CLIENT_ARGS[@]}" \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
@@ -79,6 +85,7 @@ while IFS=$'\t' read -r table_name expected_count; do
 
   actual_count="$(
     mariadb \
+      "${DB_CLIENT_ARGS[@]}" \
       --batch \
       --skip-column-names \
       --host="$DB_HOST" \

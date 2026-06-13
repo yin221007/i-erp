@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+DEPLOY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$DEPLOY_LIB_DIR/db-client-args.sh"
+
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
 }
@@ -95,6 +98,7 @@ database_count() {
   local database_name="$1"
   local table_name="$2"
   mariadb \
+    "${DB_CLIENT_ARGS[@]}" \
     --batch \
     --skip-column-names \
     --host="$DB_HOST" \

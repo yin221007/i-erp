@@ -23,6 +23,7 @@ quarantine_failed_database() {
   local quarantine_root="$1"
   mkdir -p "$quarantine_root"
   if ! mariadb-dump \
+      "${DB_CLIENT_ARGS[@]}" \
       --single-transaction \
       --quick \
       --host="$DB_HOST" \
@@ -41,6 +42,7 @@ restore_database() {
     die "DB_NAME contains unsupported characters"
   log "Restoring database $DB_NAME from $(basename "$ROLLBACK_SNAPSHOT")"
   mariadb \
+    "${DB_CLIENT_ARGS[@]}" \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
@@ -48,6 +50,7 @@ restore_database() {
     --execute="DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
   gzip -dc "$ROLLBACK_SNAPSHOT/database.sql.gz" |
     mariadb \
+      "${DB_CLIENT_ARGS[@]}" \
       --host="$DB_HOST" \
       --port="${DB_PORT:-3306}" \
       --user="$DB_USER" \
