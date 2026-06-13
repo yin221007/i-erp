@@ -10,8 +10,7 @@ test('deployment database checks use the backup image client', async () => {
     'utf8'
   );
 
-  assert.match(source, /docker run/);
-  assert.match(source, /--entrypoint mariadb/);
+  assert.match(source, /docker run --rm -i --entrypoint mariadb/);
   assert.match(source, /IERP_BACKUP_IMAGE/);
   assert.match(source, /db_client/);
 });

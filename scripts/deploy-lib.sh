@@ -33,7 +33,7 @@ database_image() {
 }
 
 db_client() {
-  docker run --rm --entrypoint mariadb \
+  docker run --rm -i --entrypoint mariadb \
     "$(database_image)" \
     "${DB_CLIENT_ARGS[@]}" \
     --host="$DB_HOST" \

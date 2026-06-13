@@ -1,5 +1,48 @@
 # Errors
 
+## [ERR-20260613-010] container-db-client-stdin
+
+**Logged**: 2026-06-13T23:15:00+08:00
+**Priority**: critical
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+The containerized MariaDB client did not attach standard input, so rollback
+database imports terminated the upstream decompressor with a broken pipe.
+
+### Error
+
+```text
+gzip exited with status 141 while streaming database.sql.gz
+```
+
+### Context
+
+- Read-only database checks succeeded because they did not use standard input.
+- The isolated rollback database was created, but no production database,
+  uploads, container, port, or Lucky route was changed.
+
+### Suggested Fix
+
+Run the shared MariaDB client container with `docker run -i` and keep a
+regression test that requires the interactive standard-input attachment.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `scripts/deploy-lib.sh`,
+  `tests/scripts/container-db-client.test.js`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T23:16:00+08:00
+- **Notes**: Added `-i`, reproduced the prior test failure, and passed the
+  deployment and rollback test suites before repeating the rehearsal.
+
+---
+
 ## [ERR-20260613-009] legacy-production-entrypoint
 
 **Logged**: 2026-06-13T23:45:00+08:00
