@@ -1,5 +1,4 @@
 import express from 'express';
-import { randomUUID } from 'node:crypto';
 import { requireAuth } from '../auth/middleware.js';
 import {
   canWriteResource,
@@ -11,6 +10,7 @@ import {
   hashPassword,
   isPasswordHash
 } from '../auth/passwords.js';
+import { moveToRecycleBin } from '../services/recycle-bin.js';
 
 function parseJson(value, context) {
   if (value && typeof value === 'object') return structuredClone(value);
@@ -132,20 +132,11 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         return res.status(403).json({ error: 'Write access denied' });
       }
 
-      const recycleRecord = {
-        id: randomUUID(),
-        originalId: id,
-        resourceType: resource,
-        name: record.name || record.title || record.nickname || '未知',
-        deletedAt: new Date().toISOString(),
-        deletedBy: req.authUser.nickname,
-        data: record
-      };
-      await pool.query(
-        'INSERT INTO recycle_bin (id, json_data) VALUES (?, ?)',
-        [recycleRecord.id, JSON.stringify(recycleRecord)]
-      );
-      await pool.query(`DELETE FROM \`${resource}\` WHERE id = ?`, [id]);
+      await moveToRecycleBin(pool, {
+        resource,
+        id,
+        user: req.authUser
+      });
       res.json({ success: true });
     } catch (error) {
       next(error);

@@ -18,6 +18,7 @@ import {
   enforceOrigin
 } from './server/auth/middleware.js';
 import { createAuthRouter } from './server/routes/auth.js';
+import { createRecycleBinRouter } from './server/routes/recycle-bin.js';
 import { createResourceRouter } from './server/routes/resources.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -355,6 +356,7 @@ app.post('/upload', (req, res) => {
   });
 });
 
+app.use(createRecycleBinRouter({ pool }));
 app.use(createResourceRouter({ pool }));
 
 initDB()
