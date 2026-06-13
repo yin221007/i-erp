@@ -3,7 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { WorkflowNode, TaskStatus, Project, ArchiveItem } from '../types';
 import { CheckCircle2, Clock, AlertCircle, FileText, Edit2, Save, X, Calendar, Sparkles, Loader2, Target, Zap } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
+import { fetchAiModels, streamAiChat } from '../lib/ai-client';
+
+const API_URL = (window as any)._env_?.API_URL || '/api';
 
 interface ProjectSummaryProps {
   project: Project;
@@ -55,7 +57,6 @@ const ProjectSummary: React.FC<ProjectSummaryProps> = ({ project, nodes, archive
   const handleAIAnalysis = async () => {
       setIsAnalyzing(true);
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const prompt = `你是一个资深的厨房设备工程专家。请根据以下项目数据进行简短的深度分析（不超过150字）：
           项目名称: ${project.name}
           当前总进度: ${progress}%
@@ -67,13 +68,23 @@ const ProjectSummary: React.FC<ProjectSummaryProps> = ({ project, nodes, archive
           合同到期日: ${project.deadline}
           
           请指出目前的核心风险点，并给出一条针对性的专家建议。`;
-
-          const response = await ai.models.generateContent({
-              model: 'gemini-3-flash-preview',
-              contents: prompt
-          });
-
-          setAiInsight(response.text || "AI 诊断未能生成有效内容。");
+          const models = await fetchAiModels(API_URL);
+          const model = models[0];
+          if (!model) throw new Error('暂无可用 AI 模型');
+          let content = '';
+          await streamAiChat(
+              API_URL,
+              {
+                  modelId: model.id,
+                  messages: [{ role: 'user', content: prompt }],
+                  reasoning: model.reasoning
+              },
+              token => {
+                  content += token;
+                  setAiInsight(content);
+              }
+          );
+          if (!content) setAiInsight("AI 诊断未能生成有效内容。");
       } catch (e) {
           setAiInsight("AI 分析暂时不可用，请重试。");
       } finally {

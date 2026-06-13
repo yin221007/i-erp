@@ -13,7 +13,18 @@ export interface Attachment {
   type: string;
   size: string;
   category?: ArchiveCategory; 
-  base64Data?: string; // 临时存储用于 AI 直接读取
+}
+
+export interface AIModel {
+  id: string;
+  provider: 'deepseek';
+  modelId: string;
+  displayName: string;
+  enabled: boolean;
+  reasoning: boolean;
+  contextLimit: number;
+  maxOutputTokens: number;
+  sortOrder: number;
 }
 
 export interface Memo {
@@ -240,11 +251,6 @@ export interface UserPreferences {
   };
 
   webhooks?: NotificationWebhooks;
-
-  // AI 接口密钥存储 (Google GenAI Keys handled exclusively by process.env.API_KEY)
-  aiKeys?: {
-    siliconFlow?: string;
-  };
 }
 
 export interface AppSettings {

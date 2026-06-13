@@ -41,6 +41,47 @@ initialization rather than relying on a preceding `cd`.
 
 ---
 
+## [ERR-20260613-004] api-tests-loopback-sandbox
+
+**Logged**: 2026-06-13T18:30:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The full Supertest suite could not bind its temporary loopback listeners inside
+the default sandbox.
+
+### Error
+
+```text
+listen EPERM: operation not permitted 0.0.0.0
+```
+
+### Context
+
+- Targeted tests had already passed with local-port permission.
+- The same full suite passed unchanged after running with the approved test
+  permission.
+
+### Suggested Fix
+
+Run `npm test` with the approved local test permission when API tests use
+Supertest listeners.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `tests/api/`
+
+### Resolution
+
+- **Resolved**: 2026-06-13T18:30:00+08:00
+- **Notes**: Re-ran the full suite with permission; all tests passed.
+
+---
+
 ## [ERR-20260613-003] npm-registry-dns
 
 **Logged**: 2026-06-13T17:30:00+08:00

@@ -67,7 +67,17 @@ export function loadConfig(environment = process.env) {
     },
     deepseek: {
       apiKey: environment.DEEPSEEK_API_KEY?.trim() || '',
-      baseUrl: 'https://api.deepseek.com'
+      baseUrl: 'https://api.deepseek.com',
+      requestTimeoutMilliseconds: positiveInteger(
+        environment.DEEPSEEK_REQUEST_TIMEOUT_MS,
+        'DEEPSEEK_REQUEST_TIMEOUT_MS',
+        90_000
+      ),
+      maximumConcurrentRequests: positiveInteger(
+        environment.DEEPSEEK_MAX_CONCURRENT_PER_USER,
+        'DEEPSEEK_MAX_CONCURRENT_PER_USER',
+        2
+      )
     },
     uploads: {
       directory: environment.UPLOAD_DIR?.trim() || '/app/uploads',

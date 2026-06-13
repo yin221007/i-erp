@@ -5,6 +5,7 @@ import {
   listEnabledAiModels,
   updateAiModel
 } from '../services/ai-models.js';
+import { createDeepSeekGateway } from '../services/ai-gateway.js';
 
 function requireAdministrator(req, res, next) {
   if (
@@ -26,6 +27,10 @@ export function createAiRouter({ pool, deepseek, gateway }) {
   if (!pool) throw new Error('pool is required');
   if (!deepseek) throw new Error('deepseek configuration is required');
   const router = express.Router();
+  const chatGateway = gateway || createDeepSeekGateway({
+    pool,
+    config: deepseek
+  });
 
   router.get('/ai/models', requireAuth, async (_req, res) => {
     try {
@@ -62,10 +67,7 @@ export function createAiRouter({ pool, deepseek, gateway }) {
   );
 
   router.post('/ai/chat', requireAuth, async (req, res) => {
-    if (!gateway) {
-      return res.status(503).json({ error: 'AI gateway is not configured' });
-    }
-    return gateway(req, res);
+    return chatGateway(req, res);
   });
 
   return router;

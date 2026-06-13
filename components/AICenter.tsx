@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { GoogleGenAI } from "@google/genai";
-import { Sparkles, Send, Trash2, Cpu, BrainCircuit, Globe, Bot, User as UserIcon, Loader2, AlertCircle, X, Settings2, ShieldCheck, Zap, Download, Image as ImageIcon, History, ChevronLeft, ChevronRight, ExternalLink, ZapOff, Layers, Terminal, Search, ArrowRight, Menu, Key, Paperclip, FileText, FileSpreadsheet, Eye, ToggleLeft, FileDown } from 'lucide-react';
+import { Sparkles, Send, Trash2, BrainCircuit, Bot, User as UserIcon, Loader2, X, Download, Image as ImageIcon, History, ChevronLeft, ChevronRight, Layers, Terminal, Menu, Paperclip, FileText, FileSpreadsheet, FileDown } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
-import { User, Attachment } from '../types';
+import { User, Attachment, AIModel } from '../types';
+import { fetchAiModels, streamAiChat } from '../lib/ai-client';
 
 const API_URL = (window as any)._env_?.API_URL || '/api';
 
@@ -36,7 +36,9 @@ const WAIT_MESSAGES = [
 const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessage, onDeleteMessage, onClearHistory }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [provider, setProvider] = useState<'gemini' | 'siliconflow' | 'nano-banana'>('gemini');
+  const [models, setModels] = useState<AIModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const [streamingMessage, setStreamingMessage] = useState<AIMessage | null>(null);
   const [waitMsgIdx, setWaitMsgIdx] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   
@@ -45,20 +47,15 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 外部提供商密钥状态 (SiliconFlow)
-  const [keys, setKeys] = useState({
-    siliconflow: localStorage.getItem('ierp_ai_key_sf') || ''
-  });
-  
-  const [showKeyModal, setShowKeyModal] = useState(false);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const selectedModel = models.find(model => model.id === selectedModelId);
 
   // 对话列表保持时间正序（旧到新）
   const displayMessages = useMemo(() => {
-    return [...messages].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  }, [messages]);
+    return [...messages, ...(streamingMessage ? [streamingMessage] : [])]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  }, [messages, streamingMessage]);
 
   const historyGroups = useMemo(() => {
     const groups: Record<string, AIMessage[]> = {};
@@ -73,6 +70,24 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
   useEffect(() => {
     scrollToBottom();
   }, [displayMessages, isLoading]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAiModels(API_URL)
+      .then((data: AIModel[]) => {
+        if (cancelled || !Array.isArray(data)) return;
+        setModels(data);
+        setSelectedModelId(current =>
+          data.some(model => model.id === current)
+            ? current
+            : data[0]?.id || ''
+        );
+      })
+      .catch(error => console.error(error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
       let interval: any;
@@ -106,18 +121,6 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -133,7 +136,6 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
         const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
-        const base64 = await fileToBase64(file);
 
         newAttachments.push({
           id: Math.random().toString(36).substr(2, 9),
@@ -141,8 +143,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
           url: fileData.url,
           uploadDate: new Date().toISOString(),
           type: file.type || 'application/octet-stream',
-          size: (file.size / 1024).toFixed(1) + ' KB',
-          base64Data: base64
+          size: (file.size / 1024).toFixed(1) + ' KB'
         });
       } catch (error) {
         console.error("文件处理失败", error);
@@ -159,142 +160,75 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
     setCurrentAttachments(prev => prev.filter(a => a.id !== id));
   };
 
-  const handleGeminiCall = async (prompt: string, attached: Attachment[]) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const parts: any[] = [{ text: prompt }];
-    
-    attached.forEach(att => {
-        if (att.base64Data) {
-            parts.push({
-                inlineData: {
-                    data: att.base64Data,
-                    mimeType: att.type
-                }
-            });
-        }
-    });
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: { parts },
-      config: {
-        systemInstruction: "你是一个资深的厨房设备工程专家。请结合用户上传的图片、PDF或文档进行深度分析。如果是图纸，请识别设备布局；如果是合同或清单，请核对规格。语气应专业且精准。",
-        temperature: 0.7,
-      }
-    });
-    return { text: response.text || "模型未返回有效回复，请重试。", type: 'multimodal' as const };
-  };
-
-  const handleSiliconFlowCall = async (prompt: string, attached: Attachment[]) => {
-    if (!keys.siliconflow) {
-      setShowKeyModal(true);
-      throw new Error("请先在配置中填入 SiliconFlow 密钥。");
-    }
-
-    let enhancedPrompt = prompt;
-    if (attached.length > 0) {
-        enhancedPrompt += "\n\n[参考文件信息]:";
-        attached.forEach(att => {
-            enhancedPrompt += `\n文件名: ${att.name}, 类型: ${att.type}`;
-        });
-        enhancedPrompt += "\n注：当前模型仅支持文本分析，请优先基于文件名和上下文提供建议。";
-    }
-
-    const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${keys.siliconflow}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: "deepseek-ai/DeepSeek-V3", 
-          messages: [
-              { role: "system", content: "你是一个资深的厨房设备工程专家助理，精通中国国家标准规范和现场施工工艺细节。" },
-              { role: "user", content: enhancedPrompt }
-          ],
-          stream: false
-        })
-    });
-
-    if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(`SiliconFlow 异常: ${errData.message || response.status}`);
-    }
-    const data = await response.json();
-    return { text: data.choices[0].message.content, type: 'text' as const };
-  };
-
-  const handleNanoBananaCall = async (prompt: string) => {
-    if (!(await (window as any).aistudio.hasSelectedApiKey())) {
-        await (window as any).aistudio.openSelectKey();
-    }
-
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-image-preview', 
-        contents: { parts: [{ text: `厨房设备工程工业渲染图, 真实感不锈钢材质, 工业设计, 4K精度, 电影级光效: ${prompt}` }] },
-        config: {
-            imageConfig: {
-                aspectRatio: "1:1",
-                imageSize: "1K"
-            }
-        }
-    });
-
-    if (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts) {
-        for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                return { text: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`, type: 'image' as const };
-            }
-        }
-    }
-    
-    throw new Error("图像生成引擎未返回数据，请检查配额或提示词。");
-  };
-
   const sendMessage = async () => {
-    if ((!input.trim() && currentAttachments.length === 0) || isLoading || isUploading) return;
+    if (
+      (!input.trim() && currentAttachments.length === 0) ||
+      isLoading ||
+      isUploading ||
+      !selectedModel
+    ) return;
 
-    const currentProvider = provider;
     const attachedToMessage = [...currentAttachments];
+    const currentInput = input.trim() || '请根据上传文件引用提供分析建议。';
     
     const userMsg: AIMessage = {
       id: Math.random().toString(36).substr(2, 9),
       role: 'user',
-      content: input,
+      content: currentInput,
       timestamp: new Date().toISOString(),
-      model: currentProvider === 'gemini' ? 'Gemini 3 Pro' : currentProvider === 'siliconflow' ? 'DeepSeek V3' : 'Nano Banana Pro',
+      model: selectedModel.displayName,
       attachments: attachedToMessage
     };
 
     onSendMessage(userMsg);
-    const currentInput = input;
     setInput('');
     setCurrentAttachments([]);
     setIsLoading(true);
+    const assistantMsg: AIMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      role: 'assistant',
+      content: '',
+      type: 'text',
+      timestamp: new Date().toISOString(),
+      model: selectedModel.displayName
+    };
+    setStreamingMessage(assistantMsg);
 
     try {
-      let aiResult;
-      if (currentProvider === 'gemini') {
-        aiResult = await handleGeminiCall(currentInput || "请分析上传的文件内容。", attachedToMessage);
-      } else if (currentProvider === 'siliconflow') {
-        aiResult = await handleSiliconFlowCall(currentInput, attachedToMessage);
-      } else {
-        aiResult = await handleNanoBananaCall(currentInput);
-      }
-
-      const assistantMsg: AIMessage = {
-        id: Math.random().toString(36).substr(2, 9),
-        role: 'assistant',
-        content: aiResult.text,
-        type: aiResult.type,
-        timestamp: new Date().toISOString(),
-        model: assistantMsgModel(currentProvider)
+      const conversation = [...messages, userMsg]
+        .filter(message => message.type !== 'image')
+        .slice(-20)
+        .map(message => ({
+          role: message.role,
+          content: message.content
+        }));
+      let content = '';
+      await streamAiChat(
+        API_URL,
+        {
+          modelId: selectedModel.id,
+          messages: conversation,
+          attachments: attachedToMessage.map(({ name, url, type }) => ({
+            name,
+            url,
+            type
+          })),
+          reasoning: selectedModel.reasoning
+        },
+        token => {
+          content += token;
+          setStreamingMessage({ ...assistantMsg, content });
+        }
+      );
+      const completedMessage = {
+        ...assistantMsg,
+        content: content || '模型未返回有效回复，请重试。'
       };
-
-      onSendMessage(assistantMsg);
+      setStreamingMessage(null);
+      onSendMessage(completedMessage);
     } catch (error: any) {
       console.error(error);
+      setStreamingMessage(null);
       const errorMsg: AIMessage = {
         id: Math.random().toString(36).substr(2, 9),
         role: 'assistant',
@@ -306,22 +240,6 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const assistantMsgModel = (provider: string) => {
-      if (provider === 'gemini') return 'Gemini 3 Pro (Vision)';
-      if (provider === 'siliconflow') return 'DeepSeek V3';
-      return 'Nano Banana Pro';
-  };
-
-  const saveKeys = () => {
-    localStorage.setItem('ierp_ai_key_sf', keys.siliconflow);
-    setShowKeyModal(false);
-  };
-
-  const handleSelectGoogleKey = async () => {
-    await (window as any).aistudio.openSelectKey();
-    alert("Google API 密钥接口已唤起，请在系统弹窗中完成选择。");
   };
 
   const downloadMessage = (content: string, model: string, type: 'text' | 'image' = 'text') => {
@@ -427,29 +345,19 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                 </div>
             </div>
 
-            <div className="flex items-center gap-1.5 md:gap-2">
-                <div className="flex bg-slate-100 dark:bg-slate-800 p-0.5 md:p-1 rounded-xl border border-slate-200 dark:border-slate-700 shadow-inner overflow-hidden max-w-[150px] sm:max-w-none">
-                    <button 
-                        onClick={() => setProvider('gemini')}
-                        className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[7px] md:text-[9px] font-black uppercase transition-all flex items-center gap-1 ${provider === 'gemini' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                        <Globe className="w-2.5 h-2.5 md:w-3 md:h-3" /> <span className="hidden xs:inline">Gemini 3</span>
-                    </button>
-                    <button 
-                        onClick={() => setProvider('siliconflow')}
-                        className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[7px] md:text-[9px] font-black uppercase transition-all flex items-center gap-1 ${provider === 'siliconflow' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                        <Zap className="w-2.5 h-2.5 md:w-3 md:h-3" /> <span className="hidden xs:inline">DeepSeek</span>
-                    </button>
-                    <button 
-                        onClick={() => setProvider('nano-banana')}
-                        className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[7px] md:text-[9px] font-black uppercase transition-all flex items-center gap-1 ${provider === 'nano-banana' ? 'bg-white dark:bg-slate-700 text-orange-500 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                        <ImageIcon className="w-2.5 h-2.5 md:w-3 md:h-3" /> <span className="hidden xs:inline">Banana</span>
-                    </button>
-                </div>
-                <button onClick={() => setShowKeyModal(true)} className="p-2 text-slate-400 hover:text-primary-600 transition-all" title="接口配置"><Settings2 className="w-4 h-4 md:w-5 md:h-5" /></button>
-            </div>
+            <select
+                value={selectedModelId}
+                onChange={event => setSelectedModelId(event.target.value)}
+                disabled={models.length === 0 || isLoading}
+                className="max-w-[180px] md:max-w-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-[9px] md:text-xs font-black text-slate-700 dark:text-slate-200 outline-none focus:border-primary-500 disabled:opacity-50"
+            >
+                {models.length === 0 && <option value="">暂无可用模型</option>}
+                {models.map(model => (
+                    <option key={model.id} value={model.id}>
+                        {model.displayName}
+                    </option>
+                ))}
+            </select>
         </div>
 
         {/* Message Container */}
@@ -462,7 +370,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                     </div>
                     <h3 className="text-xl font-black text-slate-800 dark:text-white mb-2">欢迎来到智脑中心，{currentUser.nickname}</h3>
                     <p className="text-slate-500 dark:text-slate-400 text-xs font-medium max-w-xs leading-relaxed mb-8">
-                        请上传工程图纸、合同 PDF 或现场照片。Gemini 支持视觉识别，DeepSeek 精通国标规范。
+                        统一使用系统托管的 DeepSeek 官方 API。模型列表由管理员配置，新模型发布后无需重建前端。
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-xl">
                         {[
@@ -599,7 +507,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                 </div>
             )}
 
-            <div className={`bg-slate-50 dark:bg-slate-950 rounded-[1.5rem] border-2 border-slate-100 dark:border-slate-800 focus-within:border-primary-500/30 focus-within:bg-white dark:focus-within:bg-slate-900 shadow-lg transition-all p-1.5 flex items-end gap-2 group ${provider === 'nano-banana' ? 'border-orange-500/30' : ''}`}>
+            <div className="bg-slate-50 dark:bg-slate-950 rounded-[1.5rem] border-2 border-slate-100 dark:border-slate-800 focus-within:border-primary-500/30 focus-within:bg-white dark:focus-within:bg-slate-900 shadow-lg transition-all p-1.5 flex items-end gap-2 group">
                 <div className="flex flex-col gap-1">
                     <button 
                         onClick={() => !isUploading && fileInputRef.current?.click()}
@@ -617,107 +525,19 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); sendMessage(); } }}
                     className="flex-1 bg-transparent border-none focus:ring-0 px-1 md:px-2 py-2.5 md:py-3 min-h-[40px] max-h-32 resize-none text-sm font-bold dark:text-white placeholder:text-slate-400 custom-scrollbar"
-                    placeholder={provider === 'nano-banana' ? "描述您想要生成的 3D 工程图..." : `发送消息或上传文件，通过 ${provider === 'gemini' ? 'Gemini 3 Pro' : 'DeepSeek V3'} 进行分析...`}
+                    placeholder={`发送消息或上传文件，通过 ${selectedModel?.displayName || 'DeepSeek'} 进行分析...`}
                     rows={1}
                 />
                 <button 
                     onClick={sendMessage}
                     disabled={(!input.trim() && currentAttachments.length === 0) || isLoading || isUploading}
-                    className={`p-3 md:p-3.5 text-white rounded-xl shadow-md transition-all active:scale-90 disabled:opacity-20 flex-shrink-0 ${provider === 'nano-banana' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-primary-600 hover:bg-primary-700'}`}
+                    className="p-3 md:p-3.5 text-white rounded-xl shadow-md transition-all active:scale-90 disabled:opacity-20 flex-shrink-0 bg-primary-600 hover:bg-primary-700"
                 >
-                    {provider === 'nano-banana' ? <Sparkles className="w-4 h-4 md:w-5 md:h-5" /> : <Send className="w-4 h-4 md:w-5 md:h-5" />}
+                    <Send className="w-4 h-4 md:w-5 md:h-5" />
                 </button>
             </div>
             </div>
         </div>
-
-        {/* --- 独立接口配置面板 --- */}
-        {showKeyModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-            <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-[2.5rem] md:rounded-[2.5rem] p-6 md:p-10 shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 overflow-y-auto max-h-[90vh] custom-scrollbar">
-                <div className="flex justify-between items-center mb-6 md:mb-8 border-b dark:border-slate-700 pb-4 md:pb-6">
-                    <div className="flex items-center gap-3">
-                        <Key className="w-5 h-5 md:w-6 md:h-6 text-primary-600" />
-                        <h3 className="text-base md:text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">智脑独立接口配置</h3>
-                    </div>
-                    <button onClick={() => setShowKeyModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-all text-slate-400"><X className="w-6 h-6" /></button>
-                </div>
-                
-                <div className="space-y-8">
-                    {/* 1. Gemini 通用接口 (文本/视觉) */}
-                    <div className="space-y-3">
-                        <label className="block text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1 flex items-center gap-2">
-                            <Globe className="w-3 h-3"/> Gemini 3 Pro 核心通道
-                        </label>
-                        <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between shadow-inner">
-                            <div className="flex items-center gap-2">
-                                <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                                <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">系统环境托管保护</span>
-                            </div>
-                            <button 
-                                onClick={handleSelectGoogleKey}
-                                className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-[10px] font-black text-blue-600 hover:bg-blue-50 transition-all shadow-sm active:scale-95"
-                            >
-                                选择/切换 API 密钥
-                            </button>
-                        </div>
-                        <p className="text-[8px] text-slate-400 font-bold leading-relaxed px-1">
-                            用于工程文档深度研判与 PDF 视觉解析。密钥遵循 Google 安全协议。
-                        </p>
-                    </div>
-
-                    {/* 2. Nano Banana 图像接口 */}
-                    <div className="space-y-3">
-                        <label className="block text-[10px] font-black text-orange-600 uppercase tracking-widest pl-1 flex items-center gap-2">
-                            <ImageIcon className="w-3 h-3"/> Nano Banana 图像生成通道
-                        </label>
-                        <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between shadow-inner">
-                            <div className="flex items-center gap-2">
-                                <Zap className="w-4 h-4 text-orange-500" />
-                                <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">独立付费 API 授权</span>
-                            </div>
-                            <button 
-                                onClick={handleSelectGoogleKey}
-                                className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-[10px] font-black text-orange-600 hover:bg-orange-50 transition-all shadow-sm active:scale-95"
-                            >
-                                选择/切换 API 密钥
-                            </button>
-                        </div>
-                        <p className="text-[8px] text-slate-400 font-bold leading-relaxed px-1">
-                            用于 3D 渲染图预览与工业设计参考。建议选择具有较高配额的工程项目 Key。
-                        </p>
-                    </div>
-
-                    {/* 3. SiliconFlow (第三方接口) */}
-                    <div className="space-y-3">
-                        <label className="block text-[10px] font-black text-primary-600 uppercase tracking-widest pl-1 flex items-center gap-2">
-                            <Zap className="w-3 h-3"/> SiliconFlow (DeepSeek V3)
-                        </label>
-                        <div className="relative">
-                            <input 
-                                type="password" 
-                                className="w-full border-2 border-slate-100 dark:border-slate-800 rounded-2xl px-5 py-4 bg-slate-50 dark:bg-slate-950 font-mono outline-none focus:border-primary-600 shadow-inner dark:text-white transition-all text-xs" 
-                                value={keys.siliconflow} 
-                                onChange={e => setKeys({...keys, siliconflow: e.target.value})} 
-                                placeholder="sk-..." 
-                            />
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                <Key className="w-4 h-4 text-slate-300" />
-                            </div>
-                        </div>
-                        <p className="text-[8px] text-slate-400 font-bold leading-relaxed px-1">
-                            本地加密存储。用于国标规范快速检索与施工方案合规性文本核查。
-                        </p>
-                    </div>
-                </div>
-
-                <div className="mt-10 flex justify-end gap-3 border-t dark:border-slate-700 pt-6">
-                    <button onClick={() => setShowKeyModal(false)} className="px-6 py-2.5 text-slate-400 font-black uppercase tracking-widest text-[9px] transition-colors">取消</button>
-                    <button onClick={saveKeys} className="px-10 py-3 bg-primary-600 text-white rounded-2xl font-black shadow-lg shadow-primary-500/20 active:scale-95 uppercase tracking-widest text-[9px] border border-white/10 hover:bg-primary-700 transition-all">同步配置</button>
-                </div>
-            </div>
-            </div>
-        )}
       </div>
     </div>
   );
