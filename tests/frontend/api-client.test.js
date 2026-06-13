@@ -9,6 +9,10 @@ const systemSettingsUrl = new URL(
   '../../components/SystemSettings.tsx',
   import.meta.url
 );
+const engineeringArchivesUrl = new URL(
+  '../../components/EngineeringArchives.tsx',
+  import.meta.url
+);
 
 test('API client includes cookies and handles unauthorized sessions centrally', async () => {
   const source = await readFile(apiClientUrl, 'utf8');
@@ -40,4 +44,12 @@ test('the frontend does not offer destructive browser backup restore', async () 
 
   assert.doesNotMatch(appSource, /\/backup\/import/);
   assert.doesNotMatch(settingsSource, /onImportBackup|accept="\.json"/);
+});
+
+test('engineering archives use inline preview URLs and explicit download URLs', async () => {
+  const source = await readFile(engineeringArchivesUrl, 'utf8');
+
+  assert.match(source, /download=1/);
+  assert.match(source, /iframe src=\{previewItem\.url\}/);
+  assert.match(source, /img src=\{previewItem\.url\}/);
 });

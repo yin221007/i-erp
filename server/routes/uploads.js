@@ -60,9 +60,13 @@ function uploadTypeError() {
 function isStoredFileName(filename) {
   const extension = path.extname(filename).toLowerCase();
   const stem = path.basename(filename, extension);
-  return allowedTypes.has(extension) &&
+  const isUuid =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
       .test(stem);
+  const isHistorical = /^\d{13}-\d{1,9}$/.test(stem);
+  return path.basename(filename) === filename &&
+    allowedTypes.has(extension) &&
+    (isUuid || isHistorical);
 }
 
 export function createUploadsRouter({
@@ -126,13 +130,21 @@ export function createUploadsRouter({
     }
 
     res.set('X-Content-Type-Options', 'nosniff');
-    return res.download(path.join(directory, filename), filename, error => {
+    const filePath = path.join(directory, filename);
+    const handleFileError = error => {
       if (!error) return;
       if (error.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
       next(error);
-    });
+    };
+
+    if (req.query.download === '1') {
+      return res.download(filePath, filename, handleFileError);
+    }
+
+    res.set('Content-Disposition', `inline; filename="${filename}"`);
+    return res.sendFile(filePath, handleFileError);
   });
 
   return router;

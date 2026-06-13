@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
@@ -105,7 +105,7 @@ test('unsafe extensions and extension MIME mismatches return 415', async () => {
   });
 });
 
-test('stored names are generated and downloads are forced as attachments', async () => {
+test('stored names are generated and preview inline by default', async () => {
   await withUploadApp(async (app, uploadDirectory) => {
     const uploadResponse = await request(app)
       .post('/upload')
@@ -124,13 +124,53 @@ test('stored names are generated and downloads are forced as attachments', async
     assert.equal(uploadResponse.body.filename.includes('..'), false);
     assert.deepEqual(await readdir(uploadDirectory), [uploadResponse.body.filename]);
 
-    const downloadResponse = await request(app)
+    const previewResponse = await request(app)
       .get(`/uploads/${uploadResponse.body.filename}`)
       .set('Cookie', cookie)
       .expect(200);
 
+    assert.match(previewResponse.headers['content-disposition'], /^inline;/);
+    assert.equal(previewResponse.headers['x-content-type-options'], 'nosniff');
+    assert.equal(previewResponse.text, 'hello');
+
+    const downloadResponse = await request(app)
+      .get(`/uploads/${uploadResponse.body.filename}?download=1`)
+      .set('Cookie', cookie)
+      .expect(200);
+
     assert.match(downloadResponse.headers['content-disposition'], /^attachment;/);
-    assert.equal(downloadResponse.headers['x-content-type-options'], 'nosniff');
     assert.equal(downloadResponse.text, 'hello');
+  });
+});
+
+test('historical timestamp filenames preview inline and download explicitly', async () => {
+  await withUploadApp(async (app, uploadDirectory) => {
+    const filename = '1769674116177-400514667.pdf';
+    await writeFile(path.join(uploadDirectory, filename), 'pdf-data');
+
+    const previewResponse = await request(app)
+      .get(`/uploads/${filename}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    assert.match(previewResponse.headers['content-disposition'], /^inline;/);
+
+    const downloadResponse = await request(app)
+      .get(`/uploads/${filename}?download=1`)
+      .set('Cookie', cookie)
+      .expect(200);
+    assert.match(downloadResponse.headers['content-disposition'], /^attachment;/);
+  });
+});
+
+test('stored-file access rejects arbitrary and unsupported filenames', async () => {
+  await withUploadApp(async app => {
+    await request(app)
+      .get('/uploads/customer.pdf')
+      .set('Cookie', cookie)
+      .expect(404);
+    await request(app)
+      .get('/uploads/1769674116177-400514667.js')
+      .set('Cookie', cookie)
+      .expect(404);
   });
 });

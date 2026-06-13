@@ -16,6 +16,9 @@ interface EngineeringArchivesProps {
 type SortField = 'none' | 'project' | 'category' | 'date';
 type SortDirection = 'asc' | 'desc';
 
+const getDownloadUrl = (url: string) =>
+  `${url}${url.includes('?') ? '&' : '?'}download=1`;
+
 const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, projects, onAddArchive, onDeleteArchive, onUpdateArchive, currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState<ArchiveCategory | 'All'>('All');
@@ -229,7 +232,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
                     </div>
                     <div className="col-span-12 md:col-span-2 flex items-center justify-end md:justify-center gap-2 w-full transition-all">
                         <button onClick={() => setPreviewItem(item)} className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Eye className="w-5 h-5" /></button>
-                        <a href={item.url} download className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Download className="w-5 h-5" /></a>
+                        <a href={getDownloadUrl(item.url)} download className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Download className="w-5 h-5" /></a>
                         {(currentUser.role === 'Admin' || item.uploader === currentUser.nickname) && <button onClick={(e) => { e.stopPropagation(); onDeleteArchive(item.id); }} className="p-2 text-slate-100 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"><Trash2 className="w-5 h-5" /></button>}
                     </div>
                 </div>
@@ -267,7 +270,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
                   <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800 transition-colors">
                       <div className="flex items-center gap-5 transition-all"><div className="p-3 bg-white dark:bg-slate-700 rounded-2xl border-2 border-slate-100 dark:border-slate-600 shadow-sm transition-all">{getFileIcon(previewItem.fileType)}</div><h3 className="font-black text-slate-800 dark:text-white truncate text-xl transition-colors">{previewItem.title}</h3></div>
                       <div className="flex items-center gap-4 transition-all">
-                          <a href={previewItem.url} download className="px-6 py-3 bg-primary-600 text-white text-sm font-black rounded-2xl hover:bg-primary-700 shadow-2xl shadow-primary-500/20 transition-all flex items-center gap-2 uppercase tracking-widest"><Download className="w-5 h-5" /> 立即下载</a>
+                          <a href={getDownloadUrl(previewItem.url)} download className="px-6 py-3 bg-primary-600 text-white text-sm font-black rounded-2xl hover:bg-primary-700 shadow-2xl shadow-primary-500/20 transition-all flex items-center gap-2 uppercase tracking-widest"><Download className="w-5 h-5" /> 立即下载</a>
                           <button onClick={() => setPreviewItem(null)} className="p-3 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full text-slate-500 transition-colors"><X className="w-7 h-7" /></button>
                       </div>
                   </div>
