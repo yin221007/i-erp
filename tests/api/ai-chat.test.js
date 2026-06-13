@@ -88,6 +88,7 @@ function createTestApp({
   pool = new AiChatPool(),
   user = { id: 'u-2', role: 'User' },
   fetchImpl,
+  resolveApiKey,
   requestTimeoutMilliseconds = 1_000,
   maximumConcurrentRequests = 2
 } = {}) {
@@ -105,7 +106,8 @@ function createTestApp({
       requestTimeoutMilliseconds,
       maximumConcurrentRequests,
       fetchImpl
-    }
+    },
+    resolveApiKey
   }));
   return { app, pool };
 }
@@ -158,6 +160,24 @@ test('chat uses the official DeepSeek endpoint and emits normalized SSE', async 
   assert.equal(pool.usage[0].promptTokens, 12);
   assert.equal(pool.usage[0].completionTokens, 7);
   assert.equal(pool.usage[0].status, 'success');
+});
+
+test('chat resolves the DeepSeek key at request time', async () => {
+  let authorization;
+  const { app } = createTestApp({
+    resolveApiKey: async () => 'sk-runtime-database-key',
+    fetchImpl: async (_url, options) => {
+      authorization = options.headers.Authorization;
+      return sseResponse(['[DONE]']);
+    }
+  });
+
+  await request(app)
+    .post('/ai/chat')
+    .send(chatBody)
+    .expect(200);
+
+  assert.equal(authorization, 'Bearer sk-runtime-database-key');
 });
 
 test('chat requires authentication and an enabled model', async () => {

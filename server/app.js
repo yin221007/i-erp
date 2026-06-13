@@ -27,7 +27,13 @@ export function createApp({ pool, config, pushService = createPushService() }) {
   app.use(authenticateSession({ pool }));
   app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
   app.use('/auth', createAuthRouter({ pool }));
-  if (config.deepseek) app.use(createAiRouter({ pool, deepseek: config.deepseek }));
+  if (config.deepseek) {
+    app.use(createAiRouter({
+      pool,
+      deepseek: config.deepseek,
+      secretEncryptionKey: config.secretEncryptionKey
+    }));
+  }
   if (config.uploads) app.use(createUploadsRouter(config.uploads));
   if (config.mail) {
     app.use(createEmailRouter({

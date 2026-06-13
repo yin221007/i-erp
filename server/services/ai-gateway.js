@@ -164,6 +164,7 @@ async function parseUpstreamStream(body, onEvent) {
 export function createDeepSeekGateway({
   pool,
   config,
+  resolveApiKey = async () => config.apiKey,
   fetchImpl = config.fetchImpl || globalThis.fetch
 }) {
   const activeRequests = new Map();
@@ -197,7 +198,8 @@ export function createDeepSeekGateway({
     });
 
     try {
-      if (!config.apiKey) {
+      const apiKey = await resolveApiKey();
+      if (!apiKey) {
         throw requestError('AI service is not configured', 503);
       }
       if (config.baseUrl !== 'https://api.deepseek.com') {
@@ -223,7 +225,7 @@ export function createDeepSeekGateway({
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${config.apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
             Accept: 'text/event-stream'
           },
