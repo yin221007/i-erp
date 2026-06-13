@@ -22,6 +22,11 @@ GREEN_CLONE_UPLOADS_PATH
 DB_NAME
 UPLOADS_PATH
 BACKUP_ROOT
+BACKUP_PATH
+MAINTENANCE_JOB_SECRET
+MAINTENANCE_QUEUE_PATH
+BLUE_MAINTENANCE_QUEUE_PATH
+GREEN_MAINTENANCE_QUEUE_PATH
 OLD_COMPOSE_FILE
 GREEN_FRONTEND_PORT
 ```
@@ -45,6 +50,25 @@ socket.
 Deployment and rollback database checks run the MariaDB client from the
 versioned backup image because Synology does not provide host MariaDB binaries.
 
+## Maintenance Executor
+
+After the immutable release has been promoted to `/volume2/docker/ierp`, install
+the host executor as root:
+
+```bash
+bash /volume2/docker/ierp/scripts/install-maintenance-executor.sh
+```
+
+In Synology Task Scheduler, create a root-owned task that runs every minute:
+
+```bash
+bash /volume2/docker/ierp-maintenance/run.sh
+```
+
+The installer preserves an existing signing secret, generates one only when
+missing, protects the environment file and queue, and sends executor output to
+Synology syslog. The web containers never receive the Docker socket.
+
 ## Rehearsal
 
 1. Copy the latest complete backup to a cloned database and uploads directory.
@@ -59,6 +83,10 @@ scripts/deploy-blue-green.sh --check-only
 5. Verify every active original account with its original password.
 6. Verify permissions, uploads, email, DeepSeek, recycle bin, production
    progress, backup counts, and multi-device sessions.
+7. Submit a manual backup from `系统设置 -> 数据维护`.
+8. Restore that backup only into the cloned database and cloned uploads.
+9. Inject a failure after clone data replacement and confirm the pre-restore
+   snapshot automatically restores the clone.
 
 ## Cutover
 
@@ -77,3 +105,6 @@ It never calls the Lucky API.
 
 If any step fails after the old stack stops, automatic rollback is enabled by
 default and restores the final snapshot before starting the old stack.
+
+Do not run a production restore as a deployment smoke test. Verify the
+production backup catalog and manual-backup workflow instead.
