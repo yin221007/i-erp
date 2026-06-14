@@ -32,7 +32,8 @@ function createSettingsApp({
   user = { id: 'u-1', role: 'Admin', isDefaultAdmin: true },
   deepseekApiKey = '',
   minimaxApiKey = '',
-  fetchImpl
+  fetchImpl,
+  requestTimeoutMilliseconds = 1_000
 } = {}) {
   const pool = new AiSettingsPool();
   const app = express();
@@ -48,7 +49,7 @@ function createSettingsApp({
       minimax: { apiKey: minimaxApiKey }
     },
     gatewayConfig: {
-      requestTimeoutMilliseconds: 1_000,
+      requestTimeoutMilliseconds,
       maximumConcurrentRequests: 2,
       fetchImpl
     },
@@ -160,6 +161,27 @@ test('invalid keys and unknown providers are rejected without writing secrets', 
     .expect(404);
 
   assert.equal(pool.secrets.size, 0);
+});
+
+test('connection test timeouts return 504 without exposing provider errors', async () => {
+  const { app } = createSettingsApp({
+    requestTimeoutMilliseconds: 10,
+    fetchImpl: async (_url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          reject(options.signal.reason);
+        });
+      })
+  });
+
+  const response = await request(app)
+    .post('/ai/settings/minimax/test')
+    .send({ apiKey: 'minimax-1234567890abcdefghijkl' })
+    .expect(504);
+
+  assert.deepEqual(response.body, {
+    error: 'AI connection test timed out'
+  });
 });
 
 test('connection tests use only the fixed official provider endpoint', async () => {

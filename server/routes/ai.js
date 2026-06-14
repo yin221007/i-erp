@@ -217,6 +217,7 @@ export function createAiRouter({
     requireAdministrator,
     async (req, res) => {
       let timeout;
+      let timedOut = false;
       try {
         const provider = providerFromRequest(req);
         const suppliedKey = String(req.body?.apiKey || '').trim();
@@ -233,6 +234,7 @@ export function createAiRouter({
           10_000
         );
         timeout = setTimeout(() => {
+          timedOut = true;
           controller.abort(new Error('AI connection test timed out'));
         }, timeoutMilliseconds);
         const upstream = await effectiveFetch(
@@ -252,7 +254,7 @@ export function createAiRouter({
         }
         res.json({ ok: true });
       } catch (error) {
-        if (error?.name === 'AbortError') {
+        if (timedOut || error?.name === 'AbortError') {
           sendError(res, routeError('AI connection test timed out', 504));
         } else {
           sendError(res, error);
