@@ -42,6 +42,47 @@ regression test that requires the interactive standard-input attachment.
   deployment and rollback test suites before repeating the rehearsal.
 
 ---
+## [ERR-20260615-001] remote-shell-variable-expansion
+
+**Logged**: 2026-06-15T00:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+A nested local `zsh -lc` command expanded remote shell variables before SSH
+executed the command.
+
+### Error
+
+```text
+cp: cannot stat '': No such file or directory
+```
+
+### Context
+
+- The deployment command assigned `base` and `release` on the remote host.
+- `$base` and `$release` were interpolated by the outer local double-quoted
+  shell string, producing empty paths remotely.
+- The command stopped before copying, building, or changing containers.
+
+### Suggested Fix
+
+Use fixed absolute paths in nested SSH commands, or escape every remote dollar
+sign so expansion occurs only on the remote host.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `deploy/docker-compose.green.yml`
+
+### Resolution
+
+- **Resolved**: 2026-06-15T00:00:00+08:00
+- **Notes**: Replaced remote variables with fixed absolute paths.
+
+---
 
 ## [ERR-20260613-009] legacy-production-entrypoint
 
