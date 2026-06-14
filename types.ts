@@ -17,7 +17,7 @@ export interface Attachment {
 
 export interface AIModel {
   id: string;
-  provider: 'deepseek';
+  provider: 'deepseek' | 'minimax';
   modelId: string;
   displayName: string;
   enabled: boolean;

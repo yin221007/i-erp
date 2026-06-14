@@ -1,3 +1,5 @@
+import { AI_PROVIDER_IDS } from './ai-providers.js';
+
 const MODEL_FIELDS = new Set([
   'id',
   'provider',
@@ -59,8 +61,8 @@ export function normalizeAiModel(input, routeId) {
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(model.id)) {
     throw validationError('Model id is invalid');
   }
-  if (model.provider !== 'deepseek') {
-    throw validationError('Only the DeepSeek provider is allowed');
+  if (!AI_PROVIDER_IDS.includes(model.provider)) {
+    throw validationError('AI provider is not supported');
   }
   if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(model.modelId)) {
     throw validationError('Provider model id is invalid');

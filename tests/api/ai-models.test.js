@@ -138,7 +138,35 @@ test('administrators can register future DeepSeek model IDs at runtime', async (
   ]);
 });
 
-test('model configuration cannot redirect requests away from DeepSeek', async () => {
+test('administrators can register future MiniMax model IDs at runtime', async () => {
+  const pool = new AiModelPool([initialModel]);
+  const app = createTestApp(pool, {
+    id: 'u-1',
+    role: 'Admin',
+    isDefaultAdmin: true
+  });
+  const minimaxModel = {
+    ...initialModel,
+    id: 'minimax-future',
+    provider: 'minimax',
+    modelId: 'MiniMax-Future',
+    displayName: 'MiniMax Future',
+    sortOrder: 30
+  };
+
+  await request(app)
+    .post('/ai/models')
+    .send(minimaxModel)
+    .expect(201);
+
+  const response = await request(app).get('/ai/models').expect(200);
+  assert.deepEqual(response.body.map(item => item.provider), [
+    'deepseek',
+    'minimax'
+  ]);
+});
+
+test('model configuration cannot redirect requests or add unknown providers', async () => {
   const app = createTestApp(new AiModelPool(), {
     id: 'u-1',
     role: 'Admin',
