@@ -34,6 +34,7 @@ GREEN_CLONE_PROJECT
 GREEN_CLONE_BACKEND_CONTAINER
 GREEN_CLONE_FRONTEND_CONTAINER
 GREEN_CLONE_NETWORK_NAME
+GREEN_CLONE_NETWORK_SUBNET
 GREEN_CLONE_FRONTEND_PORT
 ```
 
@@ -88,7 +89,9 @@ scripts/deploy-blue-green.sh --check-only
 
 4. Start the upgrade command and complete smoke tests on the isolated clone
    port `10668`. The clone uses a separate Compose project, container names,
-   network, database, uploads directory, and maintenance queue.
+   external network with a pre-validated subnet, database, uploads directory,
+   and maintenance queue. Change `GREEN_CLONE_NETWORK_SUBNET` if the default
+   `192.168.96.0/24` overlaps a host route or an existing Docker network.
 5. Verify every active original account with its original password.
 6. Verify permissions, uploads, email, DeepSeek, recycle bin, production
    progress, backup counts, and multi-device sessions.

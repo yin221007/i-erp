@@ -80,4 +80,4 @@ services:
 networks:
   default:
     name: "${GREEN_NETWORK_NAME:-ierp-green-net}"
-    driver: bridge
+    external: "${GREEN_NETWORK_EXTERNAL:-false}"

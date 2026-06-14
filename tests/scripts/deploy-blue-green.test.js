@@ -89,11 +89,29 @@ test('clone rehearsal uses an isolated compose project, containers, network, and
   assert.match(startClone, /GREEN_BACKEND_CONTAINER="\$GREEN_CLONE_BACKEND_CONTAINER"/);
   assert.match(startClone, /GREEN_FRONTEND_CONTAINER="\$GREEN_CLONE_FRONTEND_CONTAINER"/);
   assert.match(startClone, /GREEN_NETWORK_NAME="\$GREEN_CLONE_NETWORK_NAME"/);
+  assert.match(startClone, /GREEN_NETWORK_EXTERNAL=true/);
   assert.match(startClone, /GREEN_FRONTEND_PORT="\$GREEN_CLONE_FRONTEND_PORT"/);
   assert.match(
     startClone,
     /http:\/\/127\.0\.0\.1:\$GREEN_CLONE_FRONTEND_PORT\/health\/ready/
   );
+});
+
+test('clone rehearsal creates or verifies its dedicated network before compose up', async () => {
+  const source = await readFile(deployUrl, 'utf8');
+  const ensureNetwork = source.slice(
+    source.indexOf('ensure_clone_network()'),
+    source.indexOf('start_clone_candidate()')
+  );
+  const startClone = source.slice(
+    source.indexOf('start_clone_candidate()'),
+    source.indexOf('stop_old_stack()')
+  );
+
+  assert.match(ensureNetwork, /docker network inspect/);
+  assert.match(ensureNetwork, /docker network create/);
+  assert.match(ensureNetwork, /--subnet "\$GREEN_CLONE_NETWORK_SUBNET"/);
+  assert.match(startClone, /ensure_clone_network[\s\S]*docker compose/);
 });
 
 test('deployment builds the immutable maintenance response image', async () => {

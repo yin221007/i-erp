@@ -17,6 +17,7 @@ GREEN_CLONE_PROJECT="${GREEN_CLONE_PROJECT:-ierp-${IERP_VERSION:-candidate}-clon
 GREEN_CLONE_BACKEND_CONTAINER="${GREEN_CLONE_BACKEND_CONTAINER:-ierp-clone-backend}"
 GREEN_CLONE_FRONTEND_CONTAINER="${GREEN_CLONE_FRONTEND_CONTAINER:-ierp-clone-frontend}"
 GREEN_CLONE_NETWORK_NAME="${GREEN_CLONE_NETWORK_NAME:-ierp-clone-net}"
+GREEN_CLONE_NETWORK_SUBNET="${GREEN_CLONE_NETWORK_SUBNET:-192.168.96.0/24}"
 GREEN_CLONE_FRONTEND_PORT="${GREEN_CLONE_FRONTEND_PORT:-10668}"
 AUTO_ROLLBACK="${AUTO_ROLLBACK:-1}"
 old_stopped=0
@@ -44,14 +45,41 @@ build_candidate_images() {
     docker compose -f "$GREEN_COMPOSE_FILE" build
 }
 
+ensure_clone_network() {
+  local existing_subnets
+  [[ "$GREEN_CLONE_NETWORK_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]+$ ]] ||
+    die "Invalid clone network name"
+  [[ "$GREEN_CLONE_NETWORK_SUBNET" =~ ^[0-9A-Fa-f:.]+/[0-9]{1,3}$ ]] ||
+    die "Invalid clone network subnet"
+
+  if docker network inspect "$GREEN_CLONE_NETWORK_NAME" >/dev/null 2>&1; then
+    existing_subnets="$(
+      docker network inspect \
+        --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' \
+        "$GREEN_CLONE_NETWORK_NAME"
+    )"
+    grep -Fxq "$GREEN_CLONE_NETWORK_SUBNET" <<< "$existing_subnets" ||
+      die "Clone network exists with a different subnet"
+    return 0
+  fi
+
+  docker network create \
+    --driver bridge \
+    --subnet "$GREEN_CLONE_NETWORK_SUBNET" \
+    "$GREEN_CLONE_NETWORK_NAME" \
+    >/dev/null
+}
+
 start_clone_candidate() {
   log "Starting green candidate against cloned data"
+  ensure_clone_network
   GREEN_DB_NAME="$GREEN_CLONE_DB_NAME" \
   GREEN_UPLOADS_PATH="$GREEN_CLONE_UPLOADS_PATH" \
   GREEN_MAINTENANCE_QUEUE_PATH="$GREEN_CLONE_MAINTENANCE_QUEUE_PATH" \
   GREEN_BACKEND_CONTAINER="$GREEN_CLONE_BACKEND_CONTAINER" \
   GREEN_FRONTEND_CONTAINER="$GREEN_CLONE_FRONTEND_CONTAINER" \
   GREEN_NETWORK_NAME="$GREEN_CLONE_NETWORK_NAME" \
+  GREEN_NETWORK_EXTERNAL=true \
   GREEN_FRONTEND_PORT="$GREEN_CLONE_FRONTEND_PORT" \
   BACKUP_PATH="$BACKUP_ROOT" \
     docker compose -p "$GREEN_CLONE_PROJECT" \
