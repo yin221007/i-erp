@@ -33,3 +33,11 @@ test('browser AI settings never contain provider hosts or authorization headers'
     /api\.deepseek\.com|api\.minimaxi\.com|Authorization/
   );
 });
+
+test('AI center copy remains provider-neutral when multiple providers are enabled', async () => {
+  const source = await readFile(aiCenterUrl, 'utf8');
+
+  assert.match(source, /系统托管的官方 AI API/);
+  assert.match(source, /selectedModel\?\.displayName \|\| 'AI 模型'/);
+  assert.doesNotMatch(source, /统一使用系统托管的 DeepSeek 官方 API/);
+});

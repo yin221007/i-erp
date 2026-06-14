@@ -369,7 +369,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                     </div>
                     <h3 className="text-xl font-black text-slate-800 dark:text-white mb-2">欢迎来到智脑中心，{currentUser.nickname}</h3>
                     <p className="text-slate-500 dark:text-slate-400 text-xs font-medium max-w-xs leading-relaxed mb-8">
-                        统一使用系统托管的 DeepSeek 官方 API。模型列表由管理员配置，新模型发布后无需重建前端。
+                            统一使用系统托管的官方 AI API。模型列表由管理员配置，新模型发布后无需重建前端。
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-xl">
                         {[
@@ -524,7 +524,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); sendMessage(); } }}
                     className="flex-1 bg-transparent border-none focus:ring-0 px-1 md:px-2 py-2.5 md:py-3 min-h-[40px] max-h-32 resize-none text-sm font-bold dark:text-white placeholder:text-slate-400 custom-scrollbar"
-                    placeholder={`发送消息或上传文件，通过 ${selectedModel?.displayName || 'DeepSeek'} 进行分析...`}
+                        placeholder={`发送消息或上传文件，通过 ${selectedModel?.displayName || 'AI 模型'} 进行分析...`}
                     rows={1}
                 />
                 <button 
