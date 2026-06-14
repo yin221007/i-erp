@@ -62,6 +62,26 @@ class FakeResourcePool {
       return [{ affectedRows: 1 }, []];
     }
 
+    if (normalized === 'SELECT json_data FROM users WHERE id = ? LIMIT 1') {
+      const user = this.users.get(parameters[0]);
+      return [user ? [{ json_data: JSON.stringify(user) }] : [], []];
+    }
+
+    const replaceMatch = normalized.match(
+      /^REPLACE INTO `([a-z_]+)` \(id, json_data, updated_at\) VALUES \(\?, \?, CURRENT_TIMESTAMP\)$/
+    );
+    if (replaceMatch) {
+      const [id, jsonData] = parameters;
+      const record = JSON.parse(jsonData);
+      const table = replaceMatch[1];
+      const records = table === 'users'
+        ? this.users
+        : this.resources.get(table) || new Map();
+      records.set(id, record);
+      if (table !== 'users') this.resources.set(table, records);
+      return [{ affectedRows: 1 }, []];
+    }
+
     const tableMatch = normalized.match(
       /^SELECT json_data FROM `([a-z_]+)`(?: ORDER BY created_at ASC)?$/
     );
@@ -126,6 +146,14 @@ async function login(app) {
   return response.headers['set-cookie'][0].split(';')[0];
 }
 
+async function loginAdmin(app) {
+  const response = await request(app)
+    .post('/auth/login')
+    .send({ username: 'admin', password: 'admin-password' })
+    .expect(200);
+  return response.headers['set-cookie'][0].split(';')[0];
+}
+
 test('resource reads require a server session', async () => {
   const { app } = await createResourceTestApp();
 
@@ -147,6 +175,28 @@ test('user reads remove passwords and webhook credentials', async () => {
     response.body.some(user => user.preferences?.webhooks),
     false
   );
+});
+
+test('updating a user without a password preserves the existing password hash', async () => {
+  const { app, pool } = await createResourceTestApp();
+  const cookie = await loginAdmin(app);
+  const originalPassword = pool.users.get('u-1').password;
+
+  await request(app)
+    .put('/users/u-1')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      id: 'u-1',
+      nickname: 'admin',
+      department: '总经办',
+      role: 'Admin',
+      isDefaultAdmin: true,
+      avatar: ''
+    })
+    .expect(200);
+
+  assert.equal(pool.users.get('u-1').password, originalPassword);
 });
 
 test('AI message reads return only the authenticated user records', async () => {

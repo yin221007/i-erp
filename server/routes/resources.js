@@ -132,7 +132,22 @@ export function createResourceRouter({ pool, onRecordSaved }) {
   router.put('/:resource/:id', async (req, res, next) => {
     const { resource, id } = req.params;
     try {
-      const record = await prepareRecord(resource, req.authUser, req.body, id);
+      let input = req.body;
+      if (
+        resource === 'users' &&
+        (typeof input.password !== 'string' || input.password.length === 0)
+      ) {
+        const [rows] = await pool.query(
+          'SELECT json_data FROM users WHERE id = ? LIMIT 1',
+          [id]
+        );
+        if (rows.length > 0) {
+          const existing = parseJson(rows[0].json_data, `users/${id}`);
+          input = { ...input, password: existing.password };
+        }
+      }
+
+      const record = await prepareRecord(resource, req.authUser, input, id);
       if (!canWriteResource(resource, req.authUser, record)) {
         return res.status(403).json({ error: 'Write access denied' });
       }
