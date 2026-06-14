@@ -5,7 +5,7 @@ import {
   listEnabledAiModels,
   updateAiModel
 } from '../services/ai-models.js';
-import { createDeepSeekGateway } from '../services/ai-gateway.js';
+import { createAiGateway } from '../services/ai-gateway.js';
 import {
   deleteSystemSecret,
   maskSecret,
@@ -58,7 +58,7 @@ export function createAiRouter({
   };
   const gatewayApiKeyResolver = resolveApiKey ||
     (async () => (await resolveConfiguredKey()).apiKey);
-  const chatGateway = gateway || createDeepSeekGateway({
+  const chatGateway = gateway || createAiGateway({
     pool,
     config: deepseek,
     resolveApiKey: gatewayApiKeyResolver

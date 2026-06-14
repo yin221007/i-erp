@@ -16,9 +16,22 @@ const model = {
   sortOrder: 20
 };
 
+const minimaxModel = {
+  id: 'minimax-m3',
+  provider: 'minimax',
+  modelId: 'MiniMax-M3',
+  displayName: 'MiniMax M3',
+  enabled: true,
+  reasoning: true,
+  contextLimit: 1_000_000,
+  maxOutputTokens: 128_000,
+  sortOrder: 30
+};
+
 class AiChatPool {
-  constructor({ enabled = true } = {}) {
+  constructor({ enabled = true, models = [model] } = {}) {
     this.enabled = enabled;
+    this.models = new Map(models.map(item => [item.id, item]));
     this.usage = [];
   }
 
@@ -29,17 +42,18 @@ class AiChatPool {
       normalized.includes('FROM ai_models') &&
       normalized.includes('WHERE id = ?')
     ) {
-      if (!this.enabled || parameters[0] !== model.id) return [[], []];
+      const selectedModel = this.models.get(parameters[0]);
+      if (!this.enabled || !selectedModel) return [[], []];
       return [[{
-        id: model.id,
-        provider: model.provider,
-        model_id: model.modelId,
-        display_name: model.displayName,
+        id: selectedModel.id,
+        provider: selectedModel.provider,
+        model_id: selectedModel.modelId,
+        display_name: selectedModel.displayName,
         enabled: 1,
-        reasoning: 1,
-        context_limit: model.contextLimit,
-        max_output_tokens: model.maxOutputTokens,
-        sort_order: model.sortOrder
+        reasoning: selectedModel.reasoning ? 1 : 0,
+        context_limit: selectedModel.contextLimit,
+        max_output_tokens: selectedModel.maxOutputTokens,
+        sort_order: selectedModel.sortOrder
       }], []];
     }
     if (normalized.startsWith('INSERT INTO ai_usage')) {
@@ -163,9 +177,13 @@ test('chat uses the official DeepSeek endpoint and emits normalized SSE', async 
 });
 
 test('chat resolves the DeepSeek key at request time', async () => {
+  let resolvedProvider;
   let authorization;
   const { app } = createTestApp({
-    resolveApiKey: async () => 'sk-runtime-database-key',
+    resolveApiKey: async provider => {
+      resolvedProvider = provider;
+      return 'sk-runtime-database-key';
+    },
     fetchImpl: async (_url, options) => {
       authorization = options.headers.Authorization;
       return sseResponse(['[DONE]']);
@@ -177,7 +195,100 @@ test('chat resolves the DeepSeek key at request time', async () => {
     .send(chatBody)
     .expect(200);
 
+  assert.equal(resolvedProvider, 'deepseek');
   assert.equal(authorization, 'Bearer sk-runtime-database-key');
+});
+
+test('chat routes MiniMax models to the official endpoint and normalizes SSE', async () => {
+  let upstreamRequest;
+  let resolvedProvider;
+  const { app, pool } = createTestApp({
+    pool: new AiChatPool({ models: [model, minimaxModel] }),
+    resolveApiKey: async provider => {
+      resolvedProvider = provider;
+      return provider === 'minimax' ? 'minimax-runtime-key' : '';
+    },
+    fetchImpl: async (url, options) => {
+      upstreamRequest = {
+        url,
+        options,
+        body: JSON.parse(options.body)
+      };
+      return sseResponse([
+        JSON.stringify({
+          choices: [{
+            delta: {
+              reasoning_details: [{ text: 'Plan' }],
+              content: '答'
+            }
+          }]
+        }),
+        JSON.stringify({
+          choices: [{
+            delta: {
+              reasoning_details: [{ text: 'Plan more' }],
+              content: '答案'
+            }
+          }]
+        }),
+        JSON.stringify({
+          choices: [],
+          usage: { prompt_tokens: 8, completion_tokens: 5 }
+        }),
+        '[DONE]'
+      ]);
+    }
+  });
+
+  const response = await request(app)
+    .post('/ai/chat')
+    .send({ ...chatBody, modelId: minimaxModel.id })
+    .expect(200);
+
+  assert.equal(resolvedProvider, 'minimax');
+  assert.equal(
+    upstreamRequest.url,
+    'https://api.minimaxi.com/v1/chat/completions'
+  );
+  assert.equal(
+    upstreamRequest.options.headers.Authorization,
+    'Bearer minimax-runtime-key'
+  );
+  assert.equal(upstreamRequest.body.model, 'MiniMax-M3');
+  assert.equal(upstreamRequest.body.max_completion_tokens, 8192);
+  assert.equal('max_tokens' in upstreamRequest.body, false);
+  assert.deepEqual(upstreamRequest.body.thinking, { type: 'adaptive' });
+  assert.equal(upstreamRequest.body.reasoning_split, true);
+  assert.match(response.text, /event: reasoning[\s\S]*Plan/);
+  assert.match(response.text, /event: reasoning[\s\S]* more/);
+  assert.match(response.text, /event: token[\s\S]*答/);
+  assert.match(response.text, /event: token[\s\S]*案/);
+  assert.equal(pool.usage[0].modelId, minimaxModel.id);
+  assert.equal(pool.usage[0].promptTokens, 8);
+  assert.equal(pool.usage[0].completionTokens, 5);
+});
+
+test('a missing MiniMax key does not prevent a later DeepSeek request', async () => {
+  const requestedProviders = [];
+  const { app } = createTestApp({
+    pool: new AiChatPool({ models: [model, minimaxModel] }),
+    resolveApiKey: async provider => {
+      requestedProviders.push(provider);
+      return provider === 'deepseek' ? 'deepseek-runtime-key' : '';
+    },
+    fetchImpl: async () => sseResponse(['[DONE]'])
+  });
+
+  await request(app)
+    .post('/ai/chat')
+    .send({ ...chatBody, modelId: minimaxModel.id })
+    .expect(503);
+  await request(app)
+    .post('/ai/chat')
+    .send(chatBody)
+    .expect(200);
+
+  assert.deepEqual(requestedProviders, ['minimax', 'deepseek']);
 });
 
 test('chat requires authentication and an enabled model', async () => {

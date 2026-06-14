@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { findEnabledAiModel } from './ai-models.js';
+import { getAiProvider } from './ai-providers.js';
 
 const SYSTEM_INSTRUCTION =
   '你是资深的商用厨房设备工程专家。请依据中国现行规范、工程实践和用户提供的上下文，给出专业、准确、可执行的答复；不确定时明确说明。';
@@ -161,7 +162,7 @@ async function parseUpstreamStream(body, onEvent) {
   if (!doneReceived) throw new Error('Provider stream ended unexpectedly');
 }
 
-export function createDeepSeekGateway({
+export function createAiGateway({
   pool,
   config,
   resolveApiKey = async () => config.apiKey,
@@ -173,7 +174,7 @@ export function createDeepSeekGateway({
   const maximumConcurrentRequests =
     config.maximumConcurrentRequests || 2;
 
-  return async function deepSeekGateway(req, res) {
+  return async function aiGateway(req, res) {
     const userId = req.authUser.id;
     const activeCount = activeRequests.get(userId) || 0;
     if (activeCount >= maximumConcurrentRequests) {
@@ -198,17 +199,17 @@ export function createDeepSeekGateway({
     });
 
     try {
-      const apiKey = await resolveApiKey();
-      if (!apiKey) {
-        throw requestError('AI service is not configured', 503);
-      }
-      if (config.baseUrl !== 'https://api.deepseek.com') {
-        throw new Error('DeepSeek base URL must use the official host');
-      }
-
       const modelId = String(req.body?.modelId || '');
       const model = await findEnabledAiModel(pool, modelId);
       if (!model) throw requestError('AI model is disabled or unavailable');
+      const provider = getAiProvider(model.provider);
+      if (!provider) {
+        throw requestError('AI provider is unavailable', 503);
+      }
+      const apiKey = await resolveApiKey(provider.id);
+      if (!apiKey) {
+        throw requestError('AI service is not configured', 503);
+      }
       const messages = normalizeMessages(
         req.body?.messages,
         req.body?.attachments || []
@@ -221,7 +222,7 @@ export function createDeepSeekGateway({
 
       usageId = await startUsage(pool, userId, model.id);
       const upstream = await fetchImpl(
-        `${config.baseUrl}/chat/completions`,
+        `${provider.baseUrl}/chat/completions`,
         {
           method: 'POST',
           headers: {
@@ -229,17 +230,13 @@ export function createDeepSeekGateway({
             'Content-Type': 'application/json',
             Accept: 'text/event-stream'
           },
-          body: JSON.stringify({
+          body: JSON.stringify(provider.buildRequestBody({
             model: model.modelId,
             messages,
-            thinking: {
-              type: reasoning ? 'enabled' : 'disabled'
-            },
-            stream: true,
-            stream_options: { include_usage: true },
-            max_tokens: maxTokens,
-            user_id: pseudonymousUserId(userId)
-          }),
+            maxTokens,
+            reasoning,
+            userId: pseudonymousUserId(userId)
+          })),
           signal: controller.signal
         }
       );
@@ -258,14 +255,15 @@ export function createDeepSeekGateway({
       });
       res.flushHeaders();
 
+      const providerState = {};
       await parseUpstreamStream(upstream.body, async chunk => {
-        const delta = chunk.choices?.[0]?.delta || {};
-        if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
+        const delta = provider.extractDelta(chunk, providerState);
+        if (delta.reasoning) {
           await writeEvent(res, 'reasoning', {
-            content: delta.reasoning_content
+            content: delta.reasoning
           });
         }
-        if (typeof delta.content === 'string' && delta.content) {
+        if (delta.content) {
           await writeEvent(res, 'token', { content: delta.content });
         }
         if (chunk.usage) {
