@@ -17,6 +17,38 @@ type AiSettingsStatus = {
   source: 'database' | 'environment' | 'none';
 };
 
+type AiProviderId = 'deepseek' | 'minimax';
+
+type AiSettingsResponse = {
+  providers: Record<AiProviderId, AiSettingsStatus>;
+};
+
+const emptyAiStatus = (): AiSettingsStatus => ({
+  configured: false,
+  maskedKey: '',
+  source: 'none'
+});
+
+const aiProviderOptions: Array<{
+  id: AiProviderId;
+  title: string;
+  description: string;
+  placeholder: string;
+}> = [
+  {
+    id: 'deepseek',
+    title: 'DeepSeek 官方 API',
+    description: '用于现有 DeepSeek 模型，密钥仅在服务器加密保存。',
+    placeholder: 'sk-...'
+  },
+  {
+    id: 'minimax',
+    title: 'MiniMax 官方 API',
+    description: '使用中国区官方接口，并支持后续新增 MiniMax 模型。',
+    placeholder: '输入 MiniMax API Key'
+  }
+];
+
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -40,15 +72,20 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [isUploading, setIsUploading] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'visual' | 'data' | 'ai'>('visual');
-  const [aiStatus, setAiStatus] = useState<AiSettingsStatus>({
-    configured: false,
-    maskedKey: '',
-    source: 'none'
+  const [aiStatuses, setAiStatuses] = useState<Record<AiProviderId, AiSettingsStatus>>({
+    deepseek: emptyAiStatus(),
+    minimax: emptyAiStatus()
   });
-  const [deepSeekApiKey, setDeepSeekApiKey] = useState('');
+  const [aiApiKeys, setAiApiKeys] = useState<Record<AiProviderId, string>>({
+    deepseek: '',
+    minimax: ''
+  });
   const [isLoadingAi, setIsLoadingAi] = useState(false);
-  const [isSavingAi, setIsSavingAi] = useState(false);
-  const [aiFeedback, setAiFeedback] = useState('');
+  const [busyAiProvider, setBusyAiProvider] = useState<AiProviderId | null>(null);
+  const [aiFeedback, setAiFeedback] = useState<Record<AiProviderId, string>>({
+    deepseek: '',
+    minimax: ''
+  });
   const [backups, setBackups] = useState<BackupSnapshot[]>([]);
   const [maintenanceJobs, setMaintenanceJobs] = useState<MaintenanceJob[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
@@ -70,30 +107,42 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
     setMaintenanceJobs(jobs.jobs);
   };
 
+  const loadAiSettings = async () => {
+    const response = await apiJson<AiSettingsResponse>(
+      `${API_URL}/ai/settings`
+    );
+    setAiStatuses(response.providers);
+    return response.providers;
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
     setLocalSettings(settings);
-    setDeepSeekApiKey('');
-    setAiFeedback('');
+    setAiApiKeys({ deepseek: '', minimax: '' });
+    setAiFeedback({ deepseek: '', minimax: '' });
     setMaintenanceOperation(null);
     setSelectedBackup(null);
     setMaintenancePassword('');
     setRestoreConfirmation('');
     setMaintenanceAcknowledged(false);
     setMaintenanceFeedback('');
-    setAiStatus({
-      configured: false,
-      maskedKey: '',
-      source: 'none'
+    setAiStatuses({
+      deepseek: emptyAiStatus(),
+      minimax: emptyAiStatus()
     });
     setIsLoadingAi(true);
-    apiJson<AiSettingsStatus>(`${API_URL}/ai/settings`)
-      .then(status => {
-        if (active) setAiStatus(status);
+    apiJson<AiSettingsResponse>(`${API_URL}/ai/settings`)
+      .then(response => {
+        if (active) setAiStatuses(response.providers);
       })
       .catch(() => {
-        if (active) setAiFeedback('无法读取 DeepSeek 配置，请检查服务器连接。');
+        if (active) {
+          setAiFeedback({
+            deepseek: '无法读取 AI 配置，请检查服务器连接。',
+            minimax: '无法读取 AI 配置，请检查服务器连接。'
+          });
+        }
       })
       .finally(() => {
         if (active) setIsLoadingAi(false);
@@ -150,54 +199,91 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
     onClose();
   };
 
-  const handleSaveAiKey = async () => {
-    const apiKey = deepSeekApiKey.trim();
+  const setProviderFeedback = (
+    providerId: AiProviderId,
+    message: string
+  ) => {
+    setAiFeedback(current => ({ ...current, [providerId]: message }));
+  };
+
+  const clearProviderInput = (providerId: AiProviderId) => {
+    setAiApiKeys(current => ({ ...current, [providerId]: '' }));
+  };
+
+  const handleSaveAiKey = async (providerId: AiProviderId) => {
+    const apiKey = aiApiKeys[providerId].trim();
     if (!apiKey) return;
-    setIsSavingAi(true);
-    setAiFeedback('');
+    setBusyAiProvider(providerId);
+    setProviderFeedback(providerId, '');
     try {
       const status = await apiJson<AiSettingsStatus>(
-        `${API_URL}/ai/settings`,
+        `${API_URL}/ai/settings/${providerId}`,
         {
           method: 'PUT',
           json: { apiKey }
         }
       );
-      setAiStatus(status);
-      setDeepSeekApiKey('');
-      setAiFeedback('DeepSeek API 密钥已加密保存并立即生效。');
+      setAiStatuses(current => ({ ...current, [providerId]: status }));
+      clearProviderInput(providerId);
+      setProviderFeedback(providerId, 'API 密钥已加密保存并立即生效。');
     } catch {
-      setAiFeedback('保存失败，请确认密钥格式和服务器状态。');
+      setProviderFeedback(providerId, '保存失败，请确认密钥格式和服务器状态。');
     } finally {
-      setIsSavingAi(false);
+      setBusyAiProvider(null);
     }
   };
 
-  const handleClearAiKey = async () => {
-    if (!window.confirm('确定清除服务器中保存的 DeepSeek API 密钥吗？')) {
+  const handleClearAiKey = async (
+    providerId: AiProviderId,
+    providerTitle: string
+  ) => {
+    if (!window.confirm(`确定清除服务器中保存的 ${providerTitle} 密钥吗？`)) {
       return;
     }
-    setIsSavingAi(true);
-    setAiFeedback('');
+    setBusyAiProvider(providerId);
+    setProviderFeedback(providerId, '');
     try {
-      const response = await apiFetch(`${API_URL}/ai/settings`, {
+      const response = await apiFetch(`${API_URL}/ai/settings/${providerId}`, {
         method: 'DELETE'
       });
       if (!response.ok) throw new Error('Delete failed');
-      const status = await apiJson<AiSettingsStatus>(
-        `${API_URL}/ai/settings`
-      );
-      setAiStatus(status);
-      setDeepSeekApiKey('');
-      setAiFeedback(
-        status.source === 'environment'
+      const statuses = await loadAiSettings();
+      clearProviderInput(providerId);
+      const environmentFallback =
+        statuses[providerId].source === 'environment';
+      setProviderFeedback(
+        providerId,
+        environmentFallback
           ? '数据库密钥已清除，当前继续使用服务器环境变量中的密钥。'
-          : 'DeepSeek API 密钥已清除。'
+          : 'API 密钥已清除。'
       );
     } catch {
-      setAiFeedback('清除失败，请检查服务器连接。');
+      setProviderFeedback(providerId, '清除失败，请检查服务器连接。');
     } finally {
-      setIsSavingAi(false);
+      setBusyAiProvider(null);
+    }
+  };
+
+  const handleTestAiConnection = async (providerId: AiProviderId) => {
+    setBusyAiProvider(providerId);
+    setProviderFeedback(providerId, '');
+    try {
+      const apiKey = aiApiKeys[providerId].trim();
+      await apiJson<{ ok: true }>(
+        `${API_URL}/ai/settings/${providerId}/test`,
+        {
+          method: 'POST',
+          json: apiKey ? { apiKey } : {}
+        }
+      );
+      setProviderFeedback(providerId, '连接测试成功。');
+    } catch {
+      setProviderFeedback(
+        providerId,
+        '连接测试失败，请检查密钥、额度和网络状态。'
+      );
+    } finally {
+      setBusyAiProvider(null);
     }
   };
 
@@ -441,88 +527,108 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
                     <KeyRound className="h-6 w-6 text-primary-600" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h5 className="font-black tracking-widest text-slate-800 dark:text-white">DeepSeek 官方 API</h5>
+                    <h5 className="font-black tracking-widest text-slate-800 dark:text-white">统一 AI 供应商配置</h5>
                     <p className="mt-1 text-xs font-medium leading-relaxed text-slate-500 dark:text-slate-400">
-                      全系统统一使用此密钥。密钥仅由管理员设置，在服务器加密保存，页面不会再次显示完整内容。
+                      DeepSeek 与 MiniMax 密钥独立加密保存。页面不会再次显示完整密钥，模型会自动使用所属供应商。
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border-2 border-slate-100 bg-white p-6 dark:border-slate-700 dark:bg-slate-900/50">
-                <div className="mb-6 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">当前状态</p>
-                    <div className="mt-2 flex items-center gap-2">
-                      {isLoadingAi ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-primary-500" />
-                      ) : aiStatus.configured ? (
-                        <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                      ) : (
-                        <KeyRound className="h-5 w-5 text-orange-500" />
+              {aiProviderOptions.map(provider => {
+                const providerId = provider.id;
+                const status = aiStatuses[providerId];
+                const isBusy = busyAiProvider === providerId;
+                return (
+                  <div key={providerId} className="rounded-[2rem] border-2 border-slate-100 bg-white p-6 dark:border-slate-700 dark:bg-slate-900/50">
+                    <div className="mb-5 flex items-start justify-between gap-4">
+                      <div>
+                        <h5 className="font-black tracking-widest text-slate-800 dark:text-white">{provider.title}</h5>
+                        <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{provider.description}</p>
+                        <div className="mt-3 flex items-center gap-2">
+                          {isLoadingAi ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-primary-500" />
+                          ) : status.configured ? (
+                            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                          ) : (
+                            <KeyRound className="h-5 w-5 text-orange-500" />
+                          )}
+                          <span className={`text-sm font-black ${status.configured ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                            {isLoadingAi
+                              ? '正在读取'
+                              : status.configured
+                                ? status.source === 'environment'
+                                  ? '已由环境变量配置'
+                                  : '已配置'
+                                : '未配置'}
+                          </span>
+                        </div>
+                      </div>
+                      {status.maskedKey && (
+                        <div className="rounded-xl bg-slate-100 px-4 py-2 font-mono text-xs font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {status.maskedKey}
+                        </div>
                       )}
-                      <span className={`text-sm font-black ${aiStatus.configured ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'}`}>
-                        {isLoadingAi
-                          ? '正在读取'
-                          : aiStatus.configured
-                            ? aiStatus.source === 'environment'
-                              ? '已由环境变量配置'
-                              : '已配置'
-                            : '未配置'}
-                      </span>
+                    </div>
+
+                    <label className="mb-2 block pl-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      {status.configured ? '输入新密钥以替换' : `${provider.title} 密钥`}
+                    </label>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={aiApiKeys[providerId]}
+                      onChange={event => setAiApiKeys(current => ({
+                        ...current,
+                        [providerId]: event.target.value
+                      }))}
+                      placeholder={provider.placeholder}
+                      className="w-full rounded-2xl border-2 border-slate-100 bg-white px-5 py-3 font-mono font-bold text-slate-900 outline-none shadow-inner transition-all focus:border-primary-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                    <p className="mt-2 text-[11px] font-medium text-slate-400">
+                      可先测试输入中的新密钥；留空测试时使用服务器当前已保存的密钥。
+                    </p>
+
+                    {aiFeedback[providerId] && (
+                      <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        {aiFeedback[providerId]}
+                      </p>
+                    )}
+
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      {status.source === 'database' && (
+                        <button
+                          type="button"
+                          onClick={() => handleClearAiKey(providerId, provider.title)}
+                          disabled={isBusy}
+                          className="flex items-center justify-center gap-2 rounded-2xl border-2 border-red-100 px-5 py-3 text-xs font-black text-red-600 transition-all hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:hover:bg-red-950/30"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          清除服务器密钥
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleTestAiConnection(providerId)}
+                        disabled={isBusy || (!status.configured && !aiApiKeys[providerId].trim())}
+                        className="flex items-center justify-center gap-2 rounded-2xl border-2 border-primary-100 px-5 py-3 text-xs font-black text-primary-600 transition-all hover:border-primary-300 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-primary-900/60 dark:hover:bg-primary-950/30"
+                      >
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        测试连接
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveAiKey(providerId)}
+                        disabled={isBusy || !aiApiKeys[providerId].trim()}
+                        className="flex items-center justify-center gap-2 rounded-2xl bg-primary-600 px-7 py-3 text-xs font-black text-white shadow-xl shadow-primary-500/20 transition-all hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        保存并立即生效
+                      </button>
                     </div>
                   </div>
-                  {aiStatus.maskedKey && (
-                    <div className="rounded-xl bg-slate-100 px-4 py-2 font-mono text-xs font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {aiStatus.maskedKey}
-                    </div>
-                  )}
-                </div>
-
-                <label className="mb-2 block pl-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  {aiStatus.configured ? '输入新密钥以替换' : 'DeepSeek API 密钥'}
-                </label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={deepSeekApiKey}
-                  onChange={event => setDeepSeekApiKey(event.target.value)}
-                  placeholder="sk-..."
-                  className="w-full rounded-2xl border-2 border-slate-100 bg-white px-5 py-3 font-mono font-bold text-slate-900 outline-none shadow-inner transition-all focus:border-primary-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                />
-                <p className="mt-2 text-[11px] font-medium text-slate-400">
-                  输入框留空不会覆盖现有密钥，保存后立即用于新的 AI 请求。
-                </p>
-
-                {aiFeedback && (
-                  <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                    {aiFeedback}
-                  </p>
-                )}
-
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                  {aiStatus.source === 'database' && (
-                    <button
-                      type="button"
-                      onClick={handleClearAiKey}
-                      disabled={isSavingAi}
-                      className="flex items-center justify-center gap-2 rounded-2xl border-2 border-red-100 px-5 py-3 text-xs font-black text-red-600 transition-all hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:hover:bg-red-950/30"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      清除服务器密钥
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleSaveAiKey}
-                    disabled={isSavingAi || !deepSeekApiKey.trim()}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-primary-600 px-7 py-3 text-xs font-black text-white shadow-xl shadow-primary-500/20 transition-all hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isSavingAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    保存并立即生效
-                  </button>
-                </div>
-              </div>
+                );
+              })}
             </section>
           )}
         </div>

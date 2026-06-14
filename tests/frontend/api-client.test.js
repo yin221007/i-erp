@@ -82,14 +82,18 @@ test('user presence uses the self-service heartbeat instead of writing users', a
   );
 });
 
-test('system settings manages DeepSeek through the dedicated secret API', async () => {
+test('system settings manages DeepSeek and MiniMax through provider secret APIs', async () => {
   const source = await readFile(systemSettingsUrl, 'utf8');
 
-  assert.match(source, /\/ai\/settings/);
+  assert.match(source, /DeepSeek 官方 API/);
+  assert.match(source, /MiniMax 官方 API/);
+  assert.match(source, /\/ai\/settings\/\$\{providerId\}/);
+  assert.match(source, /\/ai\/settings\/\$\{providerId\}\/test/);
   assert.match(source, /method:\s*'PUT'/);
   assert.match(source, /method:\s*'DELETE'/);
+  assert.match(source, /method:\s*'POST'/);
   assert.match(source, /type="password"/);
-  assert.match(source, /DeepSeek/);
+  assert.match(source, /测试连接/);
   assert.doesNotMatch(source, /localSettings[^;\n]*apiKey/);
 });
 

@@ -7,6 +7,10 @@ const projectSummaryUrl = new URL(
   '../../components/ProjectSummary.tsx',
   import.meta.url
 );
+const systemSettingsUrl = new URL(
+  '../../components/SystemSettings.tsx',
+  import.meta.url
+);
 
 test('browser AI features use only the backend gateway', async () => {
   const source = [
@@ -19,4 +23,13 @@ test('browser AI features use only the backend gateway', async () => {
   assert.doesNotMatch(source, /GoogleGenAI|process\.env\.API_KEY/);
   assert.doesNotMatch(source, /Authorization|api\.siliconflow|api\.deepseek/);
   assert.doesNotMatch(source, /localStorage.*ai_key|base64Data/);
+});
+
+test('browser AI settings never contain provider hosts or authorization headers', async () => {
+  const source = await readFile(systemSettingsUrl, 'utf8');
+
+  assert.doesNotMatch(
+    source,
+    /api\.deepseek\.com|api\.minimaxi\.com|Authorization/
+  );
 });
