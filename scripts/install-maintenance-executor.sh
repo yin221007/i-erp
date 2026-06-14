@@ -14,7 +14,10 @@ fi
 
 for required_file in \
   "$IERP_ENV_FILE" \
-  "$IERP_RELEASE_ROOT/scripts/maintenance-executor.sh"; do
+  "$IERP_RELEASE_ROOT/scripts/maintenance-executor.sh" \
+  "$IERP_RELEASE_ROOT/docker-compose.yml" \
+  "$IERP_RELEASE_ROOT/deploy/docker-compose.green.yml" \
+  "$IERP_RELEASE_ROOT/deploy/docker-compose.maintenance.yml"; do
   if [[ ! -f "$required_file" ]]; then
     printf 'Required file is missing: %s\n' "$required_file" >&2
     exit 66

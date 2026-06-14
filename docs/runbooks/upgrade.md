@@ -67,7 +67,8 @@ bash /volume2/docker/ierp-maintenance/run.sh
 
 The installer preserves an existing signing secret, generates one only when
 missing, protects the environment file and queue, and sends executor output to
-Synology syslog. The web containers never receive the Docker socket.
+Synology syslog. It verifies the base, green, and maintenance Compose files are
+present. The web containers never receive the Docker socket.
 
 ## Rehearsal
 

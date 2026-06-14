@@ -1,6 +1,7 @@
 import express from 'express';
 import { verifyPassword } from '../auth/passwords.js';
 import { requireAuth } from '../auth/middleware.js';
+import { createFailureLimiter } from '../services/failure-limiter.js';
 import {
   createSession,
   revokeSessionByToken,
@@ -52,36 +53,10 @@ function normalizeLastReadMap(value) {
   return normalized;
 }
 
-function createLoginLimiter({
-  maximumFailures = 5,
-  windowMilliseconds = 15 * 60 * 1000
-} = {}) {
-  const attempts = new Map();
-
-  function currentEntry(key, now) {
-    const existing = attempts.get(key);
-    if (!existing || existing.resetAt <= now) {
-      const fresh = { failures: 0, resetAt: now + windowMilliseconds };
-      attempts.set(key, fresh);
-      return fresh;
-    }
-    return existing;
-  }
-
-  return {
-    isBlocked(key, now = Date.now()) {
-      return currentEntry(key, now).failures >= maximumFailures;
-    },
-    recordFailure(key, now = Date.now()) {
-      currentEntry(key, now).failures += 1;
-    },
-    clear(key) {
-      attempts.delete(key);
-    }
-  };
-}
-
-export function createAuthRouter({ pool, loginLimiter = createLoginLimiter() }) {
+export function createAuthRouter({
+  pool,
+  loginLimiter = createFailureLimiter()
+}) {
   const router = express.Router();
 
   router.post('/login', async (req, res, next) => {

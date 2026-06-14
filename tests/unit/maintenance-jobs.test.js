@@ -285,3 +285,29 @@ test('status listing includes signed pending jobs before the executor starts', a
     }
   ]);
 });
+
+test('status listing exposes a signed executor rejection from the failed queue', async () => {
+  const queueRoot = await createQueueRoot();
+  const queue = createMaintenanceQueue({
+    queueRoot,
+    secret: SECRET,
+    now: () => NOW
+  });
+  await mkdir(path.join(queueRoot, 'failed'), { recursive: true });
+  await writeFile(
+    path.join(queueRoot, 'failed', `${JOB_ID}.json`),
+    JSON.stringify(signMaintenanceJob(unsignedJob(), SECRET))
+  );
+
+  assert.deepEqual(await queue.listStatuses(), [
+    {
+      id: JOB_ID,
+      operation: 'restore',
+      backupId: '20260613T225651Z-upgrade',
+      state: 'failed',
+      phase: 'rejected',
+      message: '宿主机拒绝了维护任务',
+      updatedAt: NOW.toISOString()
+    }
+  ]);
+});

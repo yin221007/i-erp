@@ -40,8 +40,20 @@ test('executor dispatches only backup and restore operations', async () => {
 test('manual backup failure cannot fall through to a completed status', async () => {
   const source = await readFile(executorUrl, 'utf8');
 
-  assert.match(source, /if ! app_compose --profile backup run/);
+  assert.match(source, /if ! backup_compose --profile backup run/);
   assert.match(source, /return 1/);
+});
+
+test('executor separates the production application stack from backup services', async () => {
+  const source = await readFile(executorUrl, 'utf8');
+
+  assert.match(source, /IERP_APP_COMPOSE_FILE/);
+  assert.match(source, /deploy\/docker-compose\.green\.yml/);
+  assert.match(source, /IERP_BACKUP_COMPOSE_FILE/);
+  assert.match(source, /docker-compose\.yml/);
+  assert.match(source, /backup_compose/);
+  assert.match(source, /IERP_APP_COMPOSE_FILE="\$APP_COMPOSE_FILE"/);
+  assert.match(source, /IERP_BACKUP_COMPOSE_FILE="\$BACKUP_COMPOSE_FILE"/);
 });
 
 test('job verification runs inside the immutable backup image', async () => {
@@ -83,10 +95,10 @@ test('maintenance replaces the frontend in a fixed port-safe order', async () =>
     restore.indexOf('automatic_rollback()')
   );
 
-  assert.ok(startFunction.indexOf('app_compose stop frontend') >= 0);
+  assert.ok(startFunction.indexOf('application_compose stop frontend') >= 0);
   assert.ok(
     startFunction.indexOf('maintenance_compose up -d') >
-      startFunction.indexOf('app_compose stop frontend')
+      startFunction.indexOf('application_compose stop frontend')
   );
   assert.ok(resumeFunction.indexOf('stop_maintenance_response') >= 0);
   assert.ok(

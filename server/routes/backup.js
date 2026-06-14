@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../auth/middleware.js';
 import { verifyPassword } from '../auth/passwords.js';
+import { createFailureLimiter } from '../services/failure-limiter.js';
 
 function requireAdministrator(req, res, next) {
   if (
@@ -16,35 +17,6 @@ function maintenanceOnly(_req, res) {
   res.status(410).json({
     error: 'Browser backup file operations are disabled'
   });
-}
-
-function createFailureLimiter({
-  maximumFailures = 5,
-  windowMilliseconds = 15 * 60 * 1000
-} = {}) {
-  const attempts = new Map();
-
-  function entryFor(key, now) {
-    const current = attempts.get(key);
-    if (!current || current.resetAt <= now) {
-      const fresh = { failures: 0, resetAt: now + windowMilliseconds };
-      attempts.set(key, fresh);
-      return fresh;
-    }
-    return current;
-  }
-
-  return {
-    isBlocked(key, now = Date.now()) {
-      return entryFor(key, now).failures >= maximumFailures;
-    },
-    recordFailure(key, now = Date.now()) {
-      entryFor(key, now).failures += 1;
-    },
-    clear(key) {
-      attempts.delete(key);
-    }
-  };
 }
 
 function unavailable(_req, res) {

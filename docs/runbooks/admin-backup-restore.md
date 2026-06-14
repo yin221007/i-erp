@@ -52,6 +52,12 @@ before blocking public writes. It then serves a maintenance response, creates a
 locked pre-restore snapshot, stops the backend, restores database and uploads,
 checks counts, and resumes the application.
 
+The deployed green Compose file controls the production frontend and backend;
+the base Compose file controls backup jobs. Uploaded-file archives are rejected
+if they contain absolute paths, parent traversal, symbolic links, or hard links.
+Temporary extraction directories and old upload-directory copies are removed
+only after the restored application or automatic rollback passes verification.
+
 If failure occurs after replacement starts, automatic rollback restores the
 locked pre-restore snapshot before reopening the application. If automatic
 rollback also fails, maintenance mode remains active to prevent further writes.

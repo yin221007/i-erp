@@ -13,7 +13,8 @@ source "$IERP_ENV_FILE"
 set +a
 
 QUEUE_ROOT="${MAINTENANCE_QUEUE_PATH:?Set MAINTENANCE_QUEUE_PATH}"
-COMPOSE_FILE="${IERP_COMPOSE_FILE:-$IERP_RELEASE_ROOT/docker-compose.yml}"
+APP_COMPOSE_FILE="${IERP_APP_COMPOSE_FILE:-$IERP_RELEASE_ROOT/deploy/docker-compose.green.yml}"
+BACKUP_COMPOSE_FILE="${IERP_BACKUP_COMPOSE_FILE:-$IERP_RELEASE_ROOT/docker-compose.yml}"
 BACKUP_IMAGE="${IERP_BACKUP_IMAGE:-ierp-backup}:${IERP_VERSION:?Set IERP_VERSION}"
 EXECUTOR_LOCK="$QUEUE_ROOT/.executor.lock"
 
@@ -54,15 +55,15 @@ write_status() {
   mv "$temporary" "$QUEUE_ROOT/status/$job_id.json"
 }
 
-app_compose() {
-  docker compose --env-file "$IERP_ENV_FILE" -f "$COMPOSE_FILE" "$@"
+backup_compose() {
+  docker compose --env-file "$IERP_ENV_FILE" -f "$BACKUP_COMPOSE_FILE" "$@"
 }
 
 run_manual_backup() {
   local generated_backup_id
   generated_backup_id="$(date -u +%Y%m%dT%H%M%SZ)-manual"
   write_status running backup "Creating verified manual backup" "$generated_backup_id"
-  if ! app_compose --profile backup run --rm \
+  if ! backup_compose --profile backup run --rm \
       -e BACKUP_KIND=manual \
       -e "BACKUP_ID=$generated_backup_id" \
       backup; then
@@ -72,7 +73,9 @@ run_manual_backup() {
 }
 
 run_guarded_restore() {
-  export IERP_RELEASE_ROOT IERP_ENV_FILE IERP_COMPOSE_FILE="$COMPOSE_FILE"
+  export IERP_RELEASE_ROOT IERP_ENV_FILE
+  export IERP_APP_COMPOSE_FILE="$APP_COMPOSE_FILE"
+  export IERP_BACKUP_COMPOSE_FILE="$BACKUP_COMPOSE_FILE"
   export MAINTENANCE_QUEUE_PATH="$QUEUE_ROOT"
   export MAINTENANCE_JOB_ID="$job_id"
   export MAINTENANCE_OPERATION="$operation"

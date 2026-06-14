@@ -215,6 +215,7 @@ export function createMaintenanceQueue({
   const directories = {
     pending: path.join(queueRoot, 'pending'),
     running: path.join(queueRoot, 'running'),
+    failed: path.join(queueRoot, 'failed'),
     status: path.join(queueRoot, 'status'),
     nonces: path.join(queueRoot, 'nonces'),
     enqueueLock: path.join(queueRoot, '.enqueue.lock')
@@ -330,9 +331,10 @@ export function createMaintenanceQueue({
       }
 
       const statusIds = new Set(statuses.map(status => status.id));
-      for (const [state, directory] of [
-        ['pending', directories.pending],
-        ['running', directories.running]
+      for (const [state, directory, phase, message] of [
+        ['pending', directories.pending, 'queued', '等待宿主机执行'],
+        ['running', directories.running, 'starting', '宿主机已接收任务'],
+        ['failed', directories.failed, 'rejected', '宿主机拒绝了维护任务']
       ]) {
         for (const entry of await regularJsonFiles(directory)) {
           const id = entry.name.slice(0, -5);
@@ -353,9 +355,8 @@ export function createMaintenanceQueue({
               operation: job.operation,
               backupId: job.backupId,
               state,
-              phase: state === 'pending' ? 'queued' : 'starting',
-              message:
-                state === 'pending' ? '等待宿主机执行' : '宿主机已接收任务',
+              phase,
+              message,
               updatedAt: new Date(job.requestedAt).toISOString()
             });
           } catch {

@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/deploy-lib.sh"
 
 require_env \
-  IERP_RELEASE_ROOT IERP_ENV_FILE IERP_COMPOSE_FILE IERP_VERSION \
+  IERP_RELEASE_ROOT IERP_ENV_FILE IERP_APP_COMPOSE_FILE \
+  IERP_BACKUP_COMPOSE_FILE IERP_VERSION \
   MAINTENANCE_QUEUE_PATH MAINTENANCE_JOB_ID MAINTENANCE_OPERATION \
   MAINTENANCE_BACKUP_ID MAINTENANCE_JOB_SECRET \
   BACKUP_PATH UPLOADS_PATH DB_HOST DB_USER DB_PASSWORD DB_NAME
@@ -21,6 +22,7 @@ status_root="$MAINTENANCE_QUEUE_PATH/status"
 maintenance_compose_file="${MAINTENANCE_COMPOSE_FILE:-$IERP_RELEASE_ROOT/deploy/docker-compose.maintenance.yml}"
 pre_restore_snapshot=""
 maintenance_started=0
+frontend_stopped=0
 destructive_started=0
 completed=0
 
@@ -44,10 +46,22 @@ write_status() {
   mv "$temporary" "$status_root/$MAINTENANCE_JOB_ID.json"
 }
 
-app_compose() {
+application_compose() {
+  GREEN_DB_NAME="${GREEN_DB_NAME:-$DB_NAME}" \
+  GREEN_UPLOADS_PATH="${GREEN_UPLOADS_PATH:-$UPLOADS_PATH}" \
+  GREEN_MAINTENANCE_QUEUE_PATH="${GREEN_MAINTENANCE_QUEUE_PATH:-$MAINTENANCE_QUEUE_PATH}" \
+  GREEN_FRONTEND_PORT="${GREEN_FRONTEND_PORT:-${FRONTEND_PORT:-10667}}" \
+  BACKUP_PATH="$BACKUP_PATH" \
+    docker compose \
+      --env-file "$IERP_ENV_FILE" \
+      -f "$IERP_APP_COMPOSE_FILE" \
+      "$@"
+}
+
+backup_compose() {
   docker compose \
     --env-file "$IERP_ENV_FILE" \
-    -f "$IERP_COMPOSE_FILE" \
+    -f "$IERP_BACKUP_COMPOSE_FILE" \
     "$@"
 }
 
@@ -59,7 +73,7 @@ maintenance_compose() {
 }
 
 run_restore_drill() {
-  app_compose --profile backup run --rm \
+  backup_compose --profile backup run --rm \
     -e "BACKUP_DIR=/backups/$MAINTENANCE_BACKUP_ID" \
     backup \
     bash scripts/restore-drill.sh
@@ -67,8 +81,9 @@ run_restore_drill() {
 
 start_maintenance_response() {
   write_status running maintenance "Blocking new writes and draining requests"
-  app_compose stop frontend
-  app_compose --profile backup-scheduler stop backup-scheduler \
+  application_compose stop frontend
+  frontend_stopped=1
+  backup_compose --profile backup-scheduler stop backup-scheduler \
     >/dev/null 2>&1 || true
   maintenance_compose up -d
   maintenance_started=1
@@ -79,7 +94,7 @@ create_pre_restore_backup() {
   local pre_restore_id
   pre_restore_id="$(date -u +%Y%m%dT%H%M%SZ)-pre-restore"
   write_status running pre_restore_backup "Creating rollback snapshot"
-  app_compose --profile backup run --rm \
+  backup_compose --profile backup run --rm \
     -e BACKUP_KIND=pre-restore \
     -e "BACKUP_ID=$pre_restore_id" \
     backup
@@ -89,7 +104,7 @@ create_pre_restore_backup() {
 
 stop_application() {
   write_status running stop_application "Stopping application backend"
-  app_compose stop backend
+  application_compose stop backend
 }
 
 restore_database_from_snapshot() {
@@ -102,20 +117,58 @@ restore_database_from_snapshot() {
   compare_table_counts "$snapshot" "$DB_NAME"
 }
 
+validate_upload_archive() {
+  local archive="$1"
+  local archive_entries entry normalized
+  archive_entries="$(tar -tzf "$archive")" || return 1
+  while IFS= read -r entry; do
+    normalized="${entry#./}"
+    case "$normalized" in
+      ""|".") ;;
+      /*|../*|*/../*|*/..) return 1 ;;
+    esac
+  done <<< "$archive_entries"
+
+  tar -tvzf "$archive" |
+    awk '$1 ~ /^[lh]/ { invalid = 1 } END { exit invalid }'
+}
+
 restore_uploads_from_snapshot() {
   local snapshot="$1"
   local timestamp staging previous
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
   staging="${UPLOADS_PATH}.restore-staging-${timestamp}"
   previous="${UPLOADS_PATH}.before-restore-${timestamp}"
+  validate_upload_archive "$snapshot/uploads.tar.gz" || return 1
   mkdir -p "$staging"
-  tar -xzf "$snapshot/uploads.tar.gz" -C "$staging"
-  compare_upload_count "$snapshot" "$staging"
-  mv "$UPLOADS_PATH" "$previous"
+  if ! (
+    tar -xzf "$snapshot/uploads.tar.gz" -C "$staging"
+    compare_upload_count "$snapshot" "$staging"
+  ); then
+    rm -rf -- "$staging"
+    return 1
+  fi
+  if ! mv "$UPLOADS_PATH" "$previous"; then
+    rm -rf -- "$staging"
+    return 1
+  fi
   if ! mv "$staging" "$UPLOADS_PATH"; then
     mv "$previous" "$UPLOADS_PATH"
-    die "Restored uploads could not be promoted"
+    rm -rf -- "$staging"
+    return 1
   fi
+}
+
+cleanup_upload_quarantines() {
+  local uploads_parent uploads_name
+  [[ "$UPLOADS_PATH" == /* && "$UPLOADS_PATH" != "/" ]] || return 1
+  uploads_parent="$(dirname -- "$UPLOADS_PATH")"
+  uploads_name="$(basename -- "$UPLOADS_PATH")"
+  find "$uploads_parent" \
+    -maxdepth 1 \
+    -type d \
+    -name "${uploads_name}.before-restore-*" \
+    -exec rm -rf -- {} +
 }
 
 stop_maintenance_response() {
@@ -141,16 +194,18 @@ wait_for_backend_health() {
 }
 
 start_application() {
-  app_compose up -d backend
+  application_compose up -d backend
   wait_for_backend_health
 }
 
 resume_public_application() {
   stop_maintenance_response
-  app_compose --profile backup-scheduler up -d frontend backup-scheduler
+  application_compose up -d frontend
+  backup_compose --profile backup-scheduler up -d backup-scheduler
   wait_for_health \
-    "http://127.0.0.1:${FRONTEND_PORT:-10667}/health/ready" \
+    "http://127.0.0.1:${GREEN_FRONTEND_PORT:-${FRONTEND_PORT:-10667}}/health/ready" \
     30
+  frontend_stopped=0
 }
 
 automatic_rollback() {
@@ -161,7 +216,9 @@ automatic_rollback() {
   fi
 
   set +e
-  if [[ "$maintenance_started" -eq 0 && "$destructive_started" -eq 0 ]]; then
+  if [[ "$maintenance_started" -eq 0 &&
+    "$frontend_stopped" -eq 0 &&
+    "$destructive_started" -eq 0 ]]; then
     write_status failed validation_failed "Restore validation failed before maintenance"
     exit "$original_status"
   fi
@@ -171,33 +228,61 @@ automatic_rollback() {
     if [[ "$maintenance_started" -eq 0 ]]; then
       start_maintenance_response
     fi
-    stop_application
-    restore_database_from_snapshot "$pre_restore_snapshot"
-    database_status=$?
-    restore_uploads_from_snapshot "$pre_restore_snapshot"
-    uploads_status=$?
-    start_application
-    backend_status=$?
+    if ( stop_application ); then
+      stop_status=0
+    else
+      stop_status=$?
+    fi
+    database_status=1
+    uploads_status=1
+    if [[ "$stop_status" -eq 0 ]]; then
+      if ( restore_database_from_snapshot "$pre_restore_snapshot" ); then
+        database_status=0
+      else
+        database_status=$?
+      fi
+      if ( restore_uploads_from_snapshot "$pre_restore_snapshot" ); then
+        uploads_status=0
+      else
+        uploads_status=$?
+      fi
+    fi
+    if ( start_application ); then
+      backend_status=0
+    else
+      backend_status=$?
+    fi
     application_status=1
     if [[ "$backend_status" -eq 0 ]]; then
-      resume_public_application
-      application_status=$?
+      if ( resume_public_application ); then
+        application_status=0
+      else
+        application_status=$?
+      fi
     fi
-    if [[ "$database_status" -eq 0 &&
+    if [[ "$stop_status" -eq 0 &&
+      "$database_status" -eq 0 &&
       "$uploads_status" -eq 0 &&
       "$backend_status" -eq 0 &&
       "$application_status" -eq 0 ]]; then
+      cleanup_upload_quarantines || true
       write_status failed rolled_back "Restore failed; automatic rollback completed"
     else
       start_maintenance_response
       write_status failed rollback_failed "Restore and automatic rollback failed"
     fi
   else
-    start_application
-    backend_status=$?
+    if ( start_application ); then
+      backend_status=0
+    else
+      backend_status=$?
+    fi
     if [[ "$backend_status" -eq 0 ]]; then
-      resume_public_application
-      application_status=$?
+      if ( resume_public_application ); then
+        application_status=0
+      else
+        application_status=$?
+      fi
     else
       application_status=1
     fi
@@ -248,5 +333,6 @@ write_status running verify_restored_data "Verifying restored data"
 compare_table_counts "$selected_snapshot" "$DB_NAME"
 compare_upload_count "$selected_snapshot" "$UPLOADS_PATH"
 resume_public_application
+cleanup_upload_quarantines || true
 completed=1
 write_status completed complete "Restore completed"
