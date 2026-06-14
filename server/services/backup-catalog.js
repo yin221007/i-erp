@@ -62,7 +62,9 @@ function isManifestStructurallyValid(source) {
   const lines = source.trim().split('\n');
   return (
     lines.length > 0 &&
-    lines.every(line => /^[a-f0-9]{64}  [A-Za-z0-9._-]+$/.test(line))
+    lines.every(line =>
+      /^[a-f0-9]{64}  (?:\.\/)?[A-Za-z0-9._-]+$/.test(line)
+    )
   );
 }
 
