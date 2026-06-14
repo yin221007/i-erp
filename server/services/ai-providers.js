@@ -11,6 +11,15 @@ const providers = Object.freeze({
     displayName: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
     secretName: 'deepseek_api_key',
+    buildConnectionTestBody() {
+      return {
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: 'ping' }],
+        thinking: { type: 'disabled' },
+        stream: false,
+        max_tokens: 1
+      };
+    },
     buildRequestBody({
       model,
       messages,
@@ -46,6 +55,16 @@ const providers = Object.freeze({
     displayName: 'MiniMax',
     baseUrl: 'https://api.minimaxi.com/v1',
     secretName: 'minimax_api_key',
+    buildConnectionTestBody() {
+      return {
+        model: 'MiniMax-M3',
+        messages: [{ role: 'user', content: 'ping' }],
+        thinking: { type: 'disabled' },
+        reasoning_split: true,
+        stream: false,
+        max_completion_tokens: 1
+      };
+    },
     buildRequestBody({
       model,
       messages,

@@ -34,10 +34,11 @@ export function createApp({ pool, config, pushService = createPushService() }) {
   app.use(authenticateSession({ pool }));
   app.use(enforceOrigin({ publicOrigins: config.publicOrigins }));
   app.use('/auth', createAuthRouter({ pool }));
-  if (config.deepseek) {
+  if (config.ai) {
     app.use(createAiRouter({
       pool,
-      deepseek: config.deepseek,
+      providers: config.ai.providers,
+      gatewayConfig: config.ai,
       secretEncryptionKey: config.secretEncryptionKey
     }));
   }

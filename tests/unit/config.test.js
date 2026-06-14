@@ -28,6 +28,27 @@ test('configuration uses only the supplied database password', () => {
   assert.equal(config.secretEncryptionKey, validEnvironment.SESSION_SECRET);
 });
 
+test('configuration exposes separate DeepSeek and MiniMax provider fallbacks', () => {
+  const config = loadConfig({
+    ...validEnvironment,
+    DEEPSEEK_API_KEY: 'deepseek-environment-key',
+    MINIMAX_API_KEY: 'minimax-environment-key',
+    AI_REQUEST_TIMEOUT_MS: '45000',
+    AI_MAX_CONCURRENT_PER_USER: '3'
+  });
+
+  assert.equal(
+    config.ai.providers.deepseek.apiKey,
+    'deepseek-environment-key'
+  );
+  assert.equal(
+    config.ai.providers.minimax.apiKey,
+    'minimax-environment-key'
+  );
+  assert.equal(config.ai.requestTimeoutMilliseconds, 45_000);
+  assert.equal(config.ai.maximumConcurrentRequests, 3);
+});
+
 test('session secret must contain at least 32 characters', () => {
   assert.throws(
     () => loadConfig({ ...validEnvironment, SESSION_SECRET: 'too-short' }),
