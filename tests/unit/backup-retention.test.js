@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { selectBackupsToDelete } from '../../server/services/backup.js';
 
 const GB = 1024 ** 3;
+const retentionScriptUrl = new URL(
+  '../../scripts/apply-backup-retention.js',
+  import.meta.url
+);
 
 function backup(id, {
   kind = 'daily',
@@ -21,20 +26,28 @@ function backup(id, {
   };
 }
 
-test('retention keeps seven newest daily backups', () => {
+test('retention keeps six newest daily backups', () => {
   const backups = Array.from({ length: 10 }, (_, index) =>
     backup(String(index + 1))
   );
 
   const result = selectBackupsToDelete(backups, {
-    dailyRetention: 7,
+    dailyRetention: 6,
     upgradeRetention: 3,
     manualRetention: 3,
     capacityBytes: 500 * GB,
     requiredBytes: 0
   });
 
-  assert.deepEqual(result.deleteIds.sort(), ['1', '2', '3']);
+  assert.deepEqual(result.deleteIds.sort(), ['1', '2', '3', '4']);
+});
+
+test('retention script applies the six-daily policy', async () => {
+  const source = await readFile(retentionScriptUrl, 'utf8');
+
+  assert.match(source, /dailyRetention:\s*6/);
+  assert.match(source, /upgradeRetention:\s*3/);
+  assert.match(source, /manualRetention:\s*3/);
 });
 
 test('retention keeps three newest unlocked upgrade snapshots and all locked ones', () => {

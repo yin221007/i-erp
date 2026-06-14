@@ -46,7 +46,7 @@ for (const entry of entries) {
 }
 
 const result = selectBackupsToDelete(backups, {
-  dailyRetention: 7,
+  dailyRetention: 6,
   upgradeRetention: 3,
   manualRetention: 3,
   capacityBytes,

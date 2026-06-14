@@ -377,7 +377,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
                     <ShieldCheck className="h-7 w-7 text-emerald-500" />
                     <div>
                       <p className="text-sm font-black text-slate-700 dark:text-slate-100">500 GB 总上限</p>
-                      <p className="text-[11px] font-medium text-slate-500">每日 7 份，升级 3 份，手动 3 份；恢复前快照锁定保留。</p>
+                      <p className="text-[11px] font-medium text-slate-500">每天 2 次（06:30、18:30）；每日 6 份，升级 3 份，手动 3 份；恢复前快照锁定保留。</p>
                     </div>
                   </div>
                   <button

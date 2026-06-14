@@ -93,6 +93,17 @@ test('system settings manages DeepSeek through the dedicated secret API', async 
   assert.doesNotMatch(source, /localSettings[^;\n]*apiKey/);
 });
 
+test('backup center displays the twice-daily schedule and retention policy', async () => {
+  const source = await readFile(systemSettingsUrl, 'utf8');
+
+  assert.match(source, /每天 2 次/);
+  assert.match(source, /每日 6 份/);
+  assert.match(source, /升级 3 份/);
+  assert.match(source, /手动 3 份/);
+  assert.match(source, /06:30/);
+  assert.match(source, /18:30/);
+});
+
 test('application branding uses the public logo endpoint before login', async () => {
   const source = await readFile(appUrl, 'utf8');
 
