@@ -54,6 +54,7 @@ application_compose() {
   BACKUP_PATH="$BACKUP_PATH" \
     docker compose \
       --env-file "$IERP_ENV_FILE" \
+      -p "${GREEN_PRODUCTION_PROJECT:-deploy}" \
       -f "$IERP_APP_COMPOSE_FILE" \
       "$@"
 }

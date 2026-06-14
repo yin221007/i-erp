@@ -460,3 +460,43 @@ regular expressions.
 - **Notes**: Re-ran the search with a simpler pattern; it completed cleanly.
 
 ---
+## [ERR-20260614-001] mariadb-show-tables-quoting
+
+**Logged**: 2026-06-14T19:30:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+An inline MariaDB verification query used double-quoted `SHOW TABLES LIKE`
+syntax that the production server rejected.
+
+### Error
+
+```text
+ER_PARSE_ERROR near '\"maintenance_jobs\"'
+```
+
+### Context
+
+- The command was a read-only clone qualification check.
+- Business table counts had already matched before the existence check failed.
+
+### Suggested Fix
+
+Use a parameterized query against `information_schema.tables` for portable
+table existence checks.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: `scripts/deploy-blue-green.sh`
+
+### Resolution
+
+- **Resolved**: 2026-06-14T19:30:00+08:00
+- **Notes**: Re-ran with parameterized `information_schema.tables`; all clone
+  checks passed.
+
+---

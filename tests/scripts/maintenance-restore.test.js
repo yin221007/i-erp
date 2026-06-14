@@ -59,6 +59,19 @@ test('restore uses the deployed green stack for the app and the base stack for b
   );
 });
 
+test('restore targets the existing production compose project', async () => {
+  const source = await readFile(restoreUrl, 'utf8');
+  const applicationCompose = source.slice(
+    source.indexOf('application_compose()'),
+    source.indexOf('backup_compose()')
+  );
+
+  assert.match(
+    applicationCompose,
+    /-p "\$\{GREEN_PRODUCTION_PROJECT:-deploy\}"/
+  );
+});
+
 test('every destructive restore failure triggers pre-restore rollback', async () => {
   const source = await readFile(restoreUrl, 'utf8');
 
