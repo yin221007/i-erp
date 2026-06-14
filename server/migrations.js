@@ -145,6 +145,35 @@ async function createMaintenanceJobsTable(connection) {
   `);
 }
 
+async function seedMiniMaxModel(connection) {
+  await connection.query(
+    `INSERT IGNORE INTO ai_models (
+      id,
+      provider,
+      model_id,
+      display_name,
+      enabled,
+      reasoning,
+      context_limit,
+      max_output_tokens,
+      sort_order,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))`,
+    [
+      'minimax-m3',
+      'minimax',
+      'MiniMax-M3',
+      'MiniMax M3',
+      1,
+      1,
+      1_000_000,
+      128_000,
+      30
+    ]
+  );
+}
+
 async function migrateUserPasswords(connection, { passwordHasher }) {
   const [rows] = await connection.query(
     'SELECT id, json_data FROM users ORDER BY id FOR UPDATE'
@@ -226,6 +255,11 @@ const MIGRATIONS = Object.freeze([
     version: '006_create_maintenance_jobs',
     transactional: false,
     up: createMaintenanceJobsTable
+  },
+  {
+    version: '007_seed_minimax_model',
+    transactional: false,
+    up: seedMiniMaxModel
   }
 ]);
 

@@ -10,12 +10,14 @@ import {
 } from '../../server/auth/passwords.js';
 
 class FakeMigrationDatabase {
-  constructor({ users = [], production = [] } = {}) {
+  constructor({ users = [], production = [], aiModels = [] } = {}) {
     this.users = new Map(users.map(record => [record.id, structuredClone(record)]));
     this.production = new Map(
       production.map(record => [record.rowId, structuredClone(record.data)])
     );
-    this.aiModels = new Map();
+    this.aiModels = new Map(
+      aiModels.map(model => [model.id, structuredClone(model)])
+    );
     this.migrations = new Set();
     this.snapshot = null;
   }
@@ -184,9 +186,43 @@ test('AI model migration seeds current official models idempotently', async () =
 
   assert.deepEqual([...database.aiModels.keys()], [
     'deepseek-v4-flash',
-    'deepseek-v4-pro'
+    'deepseek-v4-pro',
+    'minimax-m3'
   ]);
+  assert.deepEqual(database.aiModels.get('minimax-m3'), {
+    id: 'minimax-m3',
+    provider: 'minimax',
+    modelId: 'MiniMax-M3',
+    displayName: 'MiniMax M3',
+    enabled: 1,
+    reasoning: 1,
+    contextLimit: 1_000_000,
+    maxOutputTokens: 128_000,
+    sortOrder: 30
+  });
   assert.equal(database.migrations.has('004_create_ai_tables'), true);
+  assert.equal(database.migrations.has('007_seed_minimax_model'), true);
+});
+
+test('AI model migration does not overwrite an existing MiniMax model', async () => {
+  const existingModel = {
+    id: 'minimax-m3',
+    provider: 'minimax',
+    modelId: 'MiniMax-M3',
+    displayName: 'MiniMax M3 Custom',
+    enabled: 0,
+    reasoning: 1,
+    contextLimit: 1_000_000,
+    maxOutputTokens: 64_000,
+    sortOrder: 99
+  };
+  const database = new FakeMigrationDatabase({
+    aiModels: [existingModel]
+  });
+
+  await runMigrations(database);
+
+  assert.deepEqual(database.aiModels.get('minimax-m3'), existingModel);
 });
 
 test('system secret storage is added through an idempotent additive migration', async () => {
@@ -204,6 +240,9 @@ test('maintenance audit storage is added through an idempotent additive migratio
   await runMigrations(database);
   await runMigrations(database);
 
-  assert.equal(MIGRATION_VERSIONS.at(-1), '006_create_maintenance_jobs');
   assert.equal(database.migrations.has('006_create_maintenance_jobs'), true);
+});
+
+test('MiniMax seed is the latest additive migration', () => {
+  assert.equal(MIGRATION_VERSIONS.at(-1), '007_seed_minimax_model');
 });
