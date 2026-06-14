@@ -29,6 +29,12 @@ BLUE_MAINTENANCE_QUEUE_PATH
 GREEN_MAINTENANCE_QUEUE_PATH
 OLD_COMPOSE_FILE
 GREEN_FRONTEND_PORT
+GREEN_PRODUCTION_PROJECT
+GREEN_CLONE_PROJECT
+GREEN_CLONE_BACKEND_CONTAINER
+GREEN_CLONE_FRONTEND_CONTAINER
+GREEN_CLONE_NETWORK_NAME
+GREEN_CLONE_FRONTEND_PORT
 ```
 
 `RESTORE_DRILL_SNAPSHOT` must contain `complete`, a valid checksum manifest,
@@ -80,7 +86,9 @@ present. The web containers never receive the Docker socket.
 scripts/deploy-blue-green.sh --check-only
 ```
 
-4. Start the upgrade command and complete smoke tests on port `10667`.
+4. Start the upgrade command and complete smoke tests on the isolated clone
+   port `10668`. The clone uses a separate Compose project, container names,
+   network, database, uploads directory, and maintenance queue.
 5. Verify every active original account with its original password.
 6. Verify permissions, uploads, email, DeepSeek, recycle bin, production
    progress, backup counts, and multi-device sessions.

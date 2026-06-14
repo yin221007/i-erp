@@ -4,7 +4,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.backend
-    container_name: ierp-green-backend
+    container_name: "${GREEN_BACKEND_CONTAINER:-ierp-green-backend}"
     restart: unless-stopped
     mem_limit: 1g
     cpu_shares: 1024
@@ -57,7 +57,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    container_name: ierp-green-frontend
+    container_name: "${GREEN_FRONTEND_CONTAINER:-ierp-green-frontend}"
     restart: unless-stopped
     mem_limit: 256m
     cpu_shares: 256
@@ -79,5 +79,5 @@ services:
 
 networks:
   default:
-    name: ierp-green-net
+    name: "${GREEN_NETWORK_NAME:-ierp-green-net}"
     driver: bridge

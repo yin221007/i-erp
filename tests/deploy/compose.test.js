@@ -76,6 +76,14 @@ test('candidate data paths are configurable and green requires clone values', as
   );
 });
 
+test('green service and network names can be isolated for clone rehearsal', async () => {
+  const green = await compose('docker-compose.green.yml');
+
+  assert.match(green.services.backend.container_name, /GREEN_BACKEND_CONTAINER/);
+  assert.match(green.services.frontend.container_name, /GREEN_FRONTEND_CONTAINER/);
+  assert.match(green.networks.default.name, /GREEN_NETWORK_NAME/);
+});
+
 test('nginx exposes live and backend readiness checks with the upload limit', async () => {
   const nginx = await readFile(new URL('nginx.conf', root), 'utf8');
 

@@ -78,6 +78,24 @@ test('deployment isolates clone jobs and wires production to the supervised queu
   );
 });
 
+test('clone rehearsal uses an isolated compose project, containers, network, and port', async () => {
+  const source = await readFile(deployUrl, 'utf8');
+  const startClone = source.slice(
+    source.indexOf('start_clone_candidate()'),
+    source.indexOf('stop_old_stack()')
+  );
+
+  assert.match(startClone, /docker compose -p "\$GREEN_CLONE_PROJECT"/);
+  assert.match(startClone, /GREEN_BACKEND_CONTAINER="\$GREEN_CLONE_BACKEND_CONTAINER"/);
+  assert.match(startClone, /GREEN_FRONTEND_CONTAINER="\$GREEN_CLONE_FRONTEND_CONTAINER"/);
+  assert.match(startClone, /GREEN_NETWORK_NAME="\$GREEN_CLONE_NETWORK_NAME"/);
+  assert.match(startClone, /GREEN_FRONTEND_PORT="\$GREEN_CLONE_FRONTEND_PORT"/);
+  assert.match(
+    startClone,
+    /http:\/\/127\.0\.0\.1:\$GREEN_CLONE_FRONTEND_PORT\/health\/ready/
+  );
+});
+
 test('deployment builds the immutable maintenance response image', async () => {
   const source = await readFile(deployUrl, 'utf8');
 
