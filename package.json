@@ -1,0 +1,43 @@
+{
+  "name": "i-erp",
+  "private": true,
+  "version": "1.10.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "test": "node --test --test-concurrency=1",
+    "test:unit": "node --test tests/unit",
+    "test:api": "node --test --test-concurrency=1 tests/api",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "verify:release": "bash scripts/verify-release.sh"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "imapflow": "^1.4.0",
+    "lucide-react": "^0.344.0",
+    "lunar-javascript": "^1.6.12",
+    "mailparser": "^3.7.1",
+    "multer": "^2.1.1",
+    "mysql2": "^3.6.0",
+    "nodemailer": "^8.0.11",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.3",
+    "sanitize-html": "^2.17.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^6.0.2",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "supertest": "^7.2.2",
+    "tailwindcss": "^3.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "yaml": "^2.9.0"
+  }
+}

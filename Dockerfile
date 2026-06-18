@@ -1,0 +1,25 @@
+# Stage 1: Build
+FROM node:20.19-alpine AS build-stage
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# 复制所有源代码
+COPY . .
+
+# 执行生产环境构建
+RUN npm run build
+
+# Stage 2: Serve
+FROM nginx:stable-alpine
+
+# 从构建阶段复制编译产物到 Nginx 目录
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# 暴露端口
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

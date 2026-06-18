@@ -1,0 +1,27 @@
+# 切换到 alpine 基础镜像以避开 Debian 仓库过期问题
+FROM node:20.19-alpine
+
+WORKDIR /app
+
+# 安装构建原生模块所需的工具 (Alpine 格式)
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    gcc \
+    libc-dev
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# 复制服务端代码
+COPY server.js ./
+COPY server ./server
+
+# 创建上传目录并授权
+RUN mkdir -p uploads && chmod 777 uploads
+
+# 暴露后端端口
+EXPOSE 3000
+
+CMD ["node", "server.js"]

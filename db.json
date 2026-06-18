@@ -1,0 +1,129 @@
+{
+  "projects": [
+    {
+      "id": "demo-project-1",
+      "name": "示例商业厨房工程",
+      "code": "DEMO-2026-001",
+      "clientName": "示例餐饮管理公司",
+      "manager": "演示经理",
+      "startDate": "2026-01-01",
+      "deadline": "2026-03-31",
+      "status": "Active",
+      "progress": 20,
+      "nodes": []
+    }
+  ],
+  "clients": [
+    {
+      "id": "demo-client-1",
+      "companyName": "示例餐饮管理公司",
+      "address": "示例城市示例路 1 号",
+      "type": "Restaurant",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "contacts": [
+        {
+          "id": "demo-contact-1",
+          "name": "演示联系人",
+          "role": "项目联系人",
+          "phone": "10000000000",
+          "email": "demo@example.com"
+        }
+      ]
+    }
+  ],
+  "equipment": [
+    {
+      "id": "demo-equipment-1",
+      "name": "示例工作台",
+      "model": "DEMO-WT-1800",
+      "brand": "Demo",
+      "category": "不锈钢设备",
+      "dimensions": "1800x800x800",
+      "powerSpecs": "N/A",
+      "waterGasSpecs": "",
+      "description": "公开发布版演示设备数据。"
+    }
+  ],
+  "schedule": [
+    {
+      "id": "demo-schedule-1",
+      "title": "示例现场勘查",
+      "date": "2026-01-08",
+      "time": "10:00",
+      "type": "SiteVisit",
+      "projectId": "demo-project-1",
+      "isCompleted": false
+    }
+  ],
+  "docs": [
+    {
+      "id": "demo-doc-1",
+      "title": "示例项目资料模板",
+      "category": "Template",
+      "fileType": "PDF",
+      "size": "0 KB",
+      "updatedAt": "2026-01-01",
+      "url": ""
+    }
+  ],
+  "archives": [
+    {
+      "id": "demo-archive-1",
+      "title": "示例图纸文件.pdf",
+      "category": "Drawing",
+      "projectName": "示例商业厨房工程",
+      "projectId": "demo-project-1",
+      "fileType": "PDF",
+      "size": "0 KB",
+      "uploadDate": "2026-01-02",
+      "uploader": "演示用户",
+      "url": ""
+    }
+  ],
+  "production": [
+    {
+      "id": "demo-production-1",
+      "projectId": "demo-project-1",
+      "projectName": "示例商业厨房工程",
+      "projectCode": "DEMO-2026-001",
+      "items": [
+        {
+          "id": "demo-unit-1",
+          "name": "示例工作台",
+          "model": "DEMO-WT-1800",
+          "quantity": 2,
+          "status": "Waiting"
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "demo-admin",
+      "nickname": "admin",
+      "password": "scrypt$v1$16384$8$1$T5/HDIMq7rHxq3Q+Pdco3Q==$8cX6p2ZowoZnZGVzxGO4aRQqCa3KA+qbLHrKalawx8IJnekThZ4pHBS9DSzBgm2m+YSoCbx37qW02oQdCQW5iA==",
+      "department": "系统管理",
+      "role": "Admin",
+      "isDefaultAdmin": true,
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Admin"
+    },
+    {
+      "id": "demo-user",
+      "nickname": "demo",
+      "password": "scrypt$v1$16384$8$1$v0SyM+ghF5EpLZs9EKFH/A==$LCFVhh1hn0C0n4plA0twbGa5XPvnia5/pUhUjM582d60XWkQn8JJ1BYLTlWBqMQfFea7kW/4AXsRc5Gz+5TZZg==",
+      "department": "演示部门",
+      "role": "User",
+      "permission": "ReadWrite",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Demo"
+    }
+  ],
+  "settings": [
+    {
+      "id": 1,
+      "appName": "i ERP",
+      "logoUrl": "",
+      "logoWidth": 40,
+      "poweredByText": "Powered by i ERP"
+    }
+  ]
+}

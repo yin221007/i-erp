@@ -1,0 +1,26 @@
+services:
+  maintenance:
+    image: "${IERP_MAINTENANCE_IMAGE:-ierp-maintenance}:${IERP_VERSION:?Set immutable IERP_VERSION}"
+    build:
+      context: ..
+      dockerfile: deploy/maintenance/Dockerfile
+    container_name: ierp-maintenance
+    restart: unless-stopped
+    mem_limit: 64m
+    cpu_shares: 64
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-10667}:80"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://127.0.0.1/health/live >/dev/null || exit 1"
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+networks:
+  default:
+    name: ierp-maintenance-net
+    driver: bridge

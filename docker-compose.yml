@@ -1,0 +1,156 @@
+services:
+  backend:
+    image: "${IERP_BACKEND_IMAGE:-ierp-backend}:${IERP_VERSION:?Set immutable IERP_VERSION}"
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: "ierp-${IERP_COLOR:-blue}-backend"
+    restart: unless-stopped
+    mem_limit: 1g
+    cpu_shares: 1024
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      NODE_ENV: production
+      DB_HOST: "${DB_HOST:?Set DB_HOST}"
+      DB_USER: "${DB_USER:?Set DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
+      DB_NAME: "${DB_NAME:-ierp}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_CONNECTION_LIMIT: "${DB_CONNECTION_LIMIT:-10}"
+      PORT: "3000"
+      TRUST_PROXY: "1"
+      PUBLIC_ORIGINS: "${PUBLIC_ORIGINS:?Set PUBLIC_ORIGINS}"
+      SESSION_SECRET: "${SESSION_SECRET:?Set SESSION_SECRET}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY:-}"
+      AI_REQUEST_TIMEOUT_MS: "${AI_REQUEST_TIMEOUT_MS:-90000}"
+      AI_MAX_CONCURRENT_PER_USER: "${AI_MAX_CONCURRENT_PER_USER:-2}"
+      UPLOAD_DIR: /app/uploads
+      UPLOAD_MAX_BYTES: "${UPLOAD_MAX_BYTES:-104857600}"
+      MAIL_ALLOWED_IMAP_ENDPOINTS: "${MAIL_ALLOWED_IMAP_ENDPOINTS:-imap.qq.com:993,hwimap.exmail.qq.com:993}"
+      MAIL_ALLOWED_SMTP_ENDPOINTS: "${MAIL_ALLOWED_SMTP_ENDPOINTS:-smtp.qq.com:465,hwsmtp.exmail.qq.com:465}"
+      MAIL_MAX_MESSAGE_BYTES: "${MAIL_MAX_MESSAGE_BYTES:-10485760}"
+      BACKUP_ROOT: /app/backups
+      MAINTENANCE_QUEUE_ROOT: /app/maintenance-queue
+      MAINTENANCE_JOB_SECRET: "${MAINTENANCE_JOB_SECRET:?Set MAINTENANCE_JOB_SECRET}"
+      TZ: Asia/Shanghai
+    volumes:
+      - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/app/uploads"
+      - "${BACKUP_PATH:-/volume2/docker/ierp-backups}:/app/backups:ro"
+      - "${MAINTENANCE_QUEUE_PATH:?Set MAINTENANCE_QUEUE_PATH}:/app/maintenance-queue"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    image: "${IERP_FRONTEND_IMAGE:-ierp-frontend}:${IERP_VERSION:?Set immutable IERP_VERSION}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "ierp-${IERP_COLOR:-blue}-frontend"
+    restart: unless-stopped
+    mem_limit: 256m
+    cpu_shares: 256
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-10666}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://127.0.0.1/health/ready >/dev/null || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  backup:
+    image: "${IERP_BACKUP_IMAGE:-ierp-backup}:${IERP_VERSION:?Set immutable IERP_VERSION}"
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    profiles:
+      - backup
+    user: "${NAS_UID:?Set NAS_UID}:${NAS_GID:?Set NAS_GID}"
+    restart: "no"
+    mem_limit: 512m
+    cpu_shares: 512
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DB_HOST: "${DB_HOST:?Set DB_HOST}"
+      DB_USER: "${DB_USER:?Set DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
+      DB_NAME: "${DB_NAME:-ierp}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_CLIENT_TLS: "${DB_CLIENT_TLS:-disabled}"
+      BACKUP_ROOT: /backups
+      UPLOADS_ROOT: /data/uploads
+      DEPLOY_ROOT: /data/deploy
+      BACKUP_KIND: "${BACKUP_KIND:-daily}"
+      BACKUP_ID: "${BACKUP_ID:-}"
+      BACKUP_CAPACITY_BYTES: "536870912000"
+      MIN_FREE_BYTES: "${MIN_FREE_BYTES:-21474836480}"
+      MIN_FREE_PERCENT: "${MIN_FREE_PERCENT:-10}"
+      TZ: Asia/Shanghai
+    volumes:
+      - "${BACKUP_PATH:-/volume2/docker/ierp-backups}:/backups"
+      - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/data/uploads:ro"
+      - "${DEPLOY_PATH:-/volume2/docker/ierp}:/data/deploy:ro"
+
+  backup-scheduler:
+    image: "${IERP_BACKUP_IMAGE:-ierp-backup}:${IERP_VERSION:?Set immutable IERP_VERSION}"
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    profiles:
+      - backup-scheduler
+    user: "${NAS_UID:?Set NAS_UID}:${NAS_GID:?Set NAS_GID}"
+    restart: unless-stopped
+    mem_limit: 512m
+    cpu_shares: 512
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - bash
+      - scripts/backup-scheduler.sh
+    environment:
+      DB_HOST: "${DB_HOST:?Set DB_HOST}"
+      DB_USER: "${DB_USER:?Set DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD}"
+      DB_NAME: "${DB_NAME:-ierp}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_CLIENT_TLS: "${DB_CLIENT_TLS:-disabled}"
+      BACKUP_ROOT: /backups
+      UPLOADS_ROOT: /data/uploads
+      DEPLOY_ROOT: /data/deploy
+      BACKUP_CAPACITY_BYTES: "536870912000"
+      MIN_FREE_BYTES: "${MIN_FREE_BYTES:-21474836480}"
+      MIN_FREE_PERCENT: "${MIN_FREE_PERCENT:-10}"
+      BACKUP_SCHEDULE_MORNING: "${BACKUP_SCHEDULE_MORNING:-06:30}"
+      BACKUP_SCHEDULE_EVENING: "${BACKUP_SCHEDULE_EVENING:-18:30}"
+      BACKUP_POLL_SECONDS: "${BACKUP_POLL_SECONDS:-300}"
+      TZ: Asia/Shanghai
+    volumes:
+      - "${BACKUP_PATH:-/volume2/docker/ierp-backups}:/backups"
+      - "${UPLOADS_PATH:-/volume2/docker/ierp/uploads}:/data/uploads:ro"
+      - "${DEPLOY_PATH:-/volume2/docker/ierp}:/data/deploy:ro"
+
+networks:
+  default:
+    name: "ierp-${IERP_COLOR:-blue}-net"
+    driver: bridge
