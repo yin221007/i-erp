@@ -94,6 +94,34 @@ test('uploads over the configured limit return 413 without retaining a partial f
   });
 });
 
+test('CAD and BIM drawing uploads accept common browser MIME variants', async () => {
+  await withUploadApp(async app => {
+    const cases = [
+      ['plan.dwg', 'application/x-dwg'],
+      ['plan.dwg', 'image/x-dwg'],
+      ['plan.dxf', 'application/x-dxf'],
+      ['model.rvt', 'application/octet-stream'],
+      ['family.rfa', 'application/octet-stream'],
+      ['kitchen.skp', 'application/vnd.sketchup.skp'],
+      ['building.ifc', 'text/plain']
+    ];
+
+    for (const [filename, contentType] of cases) {
+      const response = await request(app)
+        .post('/upload')
+        .set('Cookie', cookie)
+        .set('Origin', origin)
+        .attach('file', Buffer.from('drawing-data'), {
+          filename,
+          contentType
+        })
+        .expect(200);
+
+      assert.match(response.body.url, /^\/api\/uploads\/[0-9a-f-]+\.[a-z0-9]+$/);
+    }
+  });
+});
+
 test('unsafe extensions and extension MIME mismatches return 415', async () => {
   await withUploadApp(async app => {
     for (const filename of ['page.html', 'icon.svg', 'script.js']) {

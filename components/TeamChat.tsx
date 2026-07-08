@@ -101,8 +101,23 @@ const TeamChat: React.FC<TeamChatProps> = ({
       if (!u || !u.lastActive) return false;
       const lastActiveDate = new Date(u.lastActive);
       const now = new Date();
-      return (now.getTime() - lastActiveDate.getTime()) < 60000;
+      return (now.getTime() - lastActiveDate.getTime()) < 90000;
   };
+
+  const formatLastActive = (userId?: string) => {
+      const u = users.find(user => user.id === userId);
+      if (!u?.lastActive) return '暂无活跃记录';
+      const diffMs = Date.now() - new Date(u.lastActive).getTime();
+      if (!Number.isFinite(diffMs) || diffMs < 0) return '刚刚活跃';
+      if (diffMs < 90000) return '刚刚活跃';
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes < 60) return `${minutes} 分钟前活跃`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours} 小时前活跃`;
+      return `${Math.floor(hours / 24)} 天前活跃`;
+  };
+
+  const getOnlineCount = (participantIds?: string[]) => (participantIds || []).filter(id => checkIsOnline(id)).length;
 
   const accessibleChannels = useMemo(() => {
     return channels.filter(c => {
@@ -533,7 +548,7 @@ const TeamChat: React.FC<TeamChatProps> = ({
                     <h3 className="px-3 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-3">{searchTerm ? '结果: 私信' : '私密对话'}</h3>
                     {privateChannels.map(c => {
                         const avatar = getChannelAvatar(c);
-                        return renderChannelButton(c, <div className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 mr-2 overflow-hidden flex-shrink-0 border border-slate-200 dark:border-slate-600 shadow-sm">{avatar ? <img src={avatar} className="w-full h-full object-cover"/> : <UserIcon className="w-4 h-4 m-1 text-slate-400" />}</div>);
+                        return renderChannelButton(c, <div className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 mr-2 overflow-hidden flex-shrink-0 border border-slate-200 dark:border-slate-600 shadow-sm">{avatar ? <img src={avatar} loading="lazy" decoding="async" className="w-full h-full object-cover"/> : <UserIcon className="w-4 h-4 m-1 text-slate-400" />}</div>);
                     })}
                     {!searchTerm && (
                         <div className="mt-4 pt-4 border-t border-slate-300 dark:border-slate-700 px-3">
@@ -542,11 +557,11 @@ const TeamChat: React.FC<TeamChatProps> = ({
                                 {users.filter(u => u.id !== currentUser.id).slice(0, 8).map(u => (
                                     <button key={u.id} onClick={() => handleStartPrivateChat(u.id)} className="flex items-center gap-2 w-full py-2 text-xs text-slate-600 dark:text-slate-400 hover:text-primary-600 hover:bg-white dark:hover:bg-slate-700 rounded-lg px-2 transition-all font-bold group">
                                         <div className="relative w-5 h-5 rounded-md bg-white dark:bg-slate-700 overflow-hidden border border-slate-100 group-hover:border-primary-200 shadow-sm">
-                                            <img src={u.avatar} className="w-full h-full object-cover"/>
+                                            <img src={u.avatar} loading="lazy" decoding="async" className="w-full h-full object-cover"/>
                                             <StatusDot userId={u.id} />
                                         </div>
                                         {u.nickname}
-                                        {checkIsOnline(u.id) && <span className="text-[8px] text-emerald-500 ml-auto font-black uppercase tracking-tighter">Online</span>}
+                                        <span className="ml-auto text-[8px] font-black uppercase tracking-tighter text-slate-400">{formatLastActive(u.id)}</span>
                                     </button>
                                 ))}
                             </div>
@@ -575,7 +590,7 @@ const TeamChat: React.FC<TeamChatProps> = ({
                             <h2 className="text-lg font-black text-slate-800 dark:text-white truncate transition-colors">{activeChannel ? getChannelDisplayName(activeChannel) : '选择一个频道开始沟通'}</h2>
                             {activeChannel?.type === 'Private' && (
                                 <span className={`text-[9px] font-black uppercase tracking-widest ${checkIsOnline(getChannelOtherUserId(activeChannel) || '') ? 'text-emerald-500' : 'text-slate-400'}`}>
-                                    {checkIsOnline(getChannelOtherUserId(activeChannel) || '') ? '当前在线' : '离线中'}
+                                    {formatLastActive(getChannelOtherUserId(activeChannel))}
                                 </span>
                             )}
                          </div>
@@ -597,8 +612,8 @@ const TeamChat: React.FC<TeamChatProps> = ({
                     {activeChannel?.participants && (
                         <div className="hidden sm:flex text-[10px] font-black text-slate-500 bg-slate-100 dark:bg-slate-700 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-600 items-center gap-1.5 transition-colors">
                             <UserIcon className="w-3 h-3" /> 
-                            {activeChannel.participants.length} 人在线 
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5"></span>
+                            {getOnlineCount(activeChannel.participants)} / {activeChannel.participants.length} 在线
+                            <span className={`w-1.5 h-1.5 rounded-full ml-0.5 ${getOnlineCount(activeChannel.participants) > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
                         </div>
                     )}
                 </div>
@@ -646,7 +661,7 @@ const TeamChat: React.FC<TeamChatProps> = ({
                             return (
                                 <div key={msg.id} className={`flex gap-4 group ${isMe ? 'flex-row-reverse' : ''} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                                     <div className="relative flex-shrink-0">
-                                        <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl bg-white dark:bg-slate-700 border-2 border-white dark:border-slate-600 shadow-md overflow-hidden transition-transform group-hover:scale-105"><img src={msg.userAvatar} alt={msg.userName} className="w-full h-full object-cover" /></div>
+                                        <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl bg-white dark:bg-slate-700 border-2 border-white dark:border-slate-600 shadow-md overflow-hidden transition-transform group-hover:scale-105"><img src={msg.userAvatar} alt={msg.userName} loading="lazy" decoding="async" className="w-full h-full object-cover" /></div>
                                         <StatusDot userId={msg.userId} />
                                     </div>
                                     <div className={`flex flex-col max-w-[80%] md:max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
@@ -725,7 +740,7 @@ const TeamChat: React.FC<TeamChatProps> = ({
                                                 onClick={() => { if (isSelected) setSelectedMembers(prev => prev.filter(id => id !== user.id)); else setSelectedMembers(prev => [...prev, user.id]); }}
                                             >
                                                 <div className="relative">
-                                                    <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-700 border-2 border-transparent group-hover:border-primary-200 overflow-hidden shadow-sm transition-all"><img src={user.avatar} className="w-full h-full object-cover"/></div>
+                                                    <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-700 border-2 border-transparent group-hover:border-primary-200 overflow-hidden shadow-sm transition-all"><img src={user.avatar} loading="lazy" decoding="async" className="w-full h-full object-cover"/></div>
                                                     <StatusDot userId={user.id} />
                                                 </div>
                                                 <div className="min-w-0 flex-1 transition-all">

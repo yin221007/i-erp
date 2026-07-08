@@ -305,58 +305,7 @@ const ProjectSummary: React.FC<ProjectSummaryProps> = ({ project, nodes, archive
         </div>
       </div>
 
-      {/* AI Analysis Section - Compact Version */}
-      <div className="bg-gradient-to-br from-primary-600 to-primary-800 p-5 md:p-6 rounded-2xl md:rounded-3xl shadow-xl relative overflow-hidden group transition-all duration-500 hover:from-primary-500 hover:to-primary-700">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-20 -mt-20 blur-2xl transition-all duration-700 group-hover:opacity-40 group-hover:scale-125" />
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
-              <div className="flex-1">
-                  <div className="flex items-center gap-2.5 mb-3">
-                      <div className="p-1.5 bg-white/20 backdrop-blur-md rounded-xl border border-white/30">
-                        <Sparkles className="w-5 h-5 text-white animate-pulse" />
-                      </div>
-                      <h3 className="text-base md:text-lg font-black text-white uppercase tracking-tight">Gemini 智能工程诊断</h3>
-                  </div>
-                  {aiInsight ? (
-                      <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl border border-white/20 animate-in fade-in slide-in-from-top-2">
-                          <p className="text-xs md:text-sm font-medium text-primary-50 leading-relaxed italic">
-                              "{aiInsight}"
-                          </p>
-                      </div>
-                  ) : (
-                      <p className="text-primary-100 text-xs md:text-sm font-bold opacity-80 max-w-2xl leading-relaxed">
-                          利用 Google Gemini 大模型能力，实时诊断项目交付风险，生成资深工程专家的预警建议。
-                      </p>
-                  )}
-              </div>
-              <div className="shrink-0 flex flex-col items-center">
-                  <button 
-                      onClick={handleAIAnalysis}
-                      disabled={isAnalyzing}
-                      className="bg-white text-primary-700 px-6 py-3 rounded-xl font-black shadow-lg hover:bg-primary-50 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-50 border-2 border-transparent hover:border-white/50 text-xs uppercase tracking-widest"
-                  >
-                      {isAnalyzing ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>诊断中...</span>
-                          </>
-                      ) : (
-                          <>
-                            <Sparkles className="w-4 h-4" />
-                            <span>生成诊断报告</span>
-                          </>
-                      )}
-                  </button>
-                  {aiInsight && (
-                      <button 
-                          onClick={() => setAiInsight(null)}
-                          className="mt-3 block w-full text-center text-[9px] font-black text-white/60 hover:text-white uppercase tracking-widest transition-colors"
-                      >
-                          清除分析
-                      </button>
-                  )}
-              </div>
-          </div>
-      </div>
+
     </div>
   );
 };

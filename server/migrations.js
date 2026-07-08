@@ -193,6 +193,57 @@ async function migrateUserPasswords(connection, { passwordHasher }) {
   }
 }
 
+async function backfillUserPermissions(connection) {
+  const [rows] = await connection.query(
+    'SELECT id, json_data FROM users ORDER BY id FOR UPDATE'
+  );
+
+  for (const row of rows) {
+    const user = parseJson(row.json_data, `users/${row.id}`);
+    if (user.permission === 'Read' || user.permission === 'ReadWrite') {
+      continue;
+    }
+
+    user.permission = 'ReadWrite';
+    await connection.query(
+      'UPDATE users SET json_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [JSON.stringify(user), row.id]
+    );
+  }
+}
+
+
+async function backfillOwnerScopedResources(connection) {
+  const [userRows] = await connection.query(
+    'SELECT id, json_data FROM users ORDER BY id FOR UPDATE'
+  );
+  const users = userRows.map(row => parseJson(row.json_data, `users/${row.id}`));
+  const owner = users.find(user => user.isDefaultAdmin) ||
+    users.find(user => user.role === 'Admin') ||
+    users[0];
+  if (!owner) return;
+
+  for (const table of ['clients', 'equipment', 'docs']) {
+    const [rows] = await connection.query(
+      `SELECT id, json_data FROM \`${table}\` ORDER BY id FOR UPDATE`
+    );
+
+    for (const row of rows) {
+      const record = parseJson(row.json_data, `${table}/${row.id}`);
+      if (record.creatorId || record.userId || record.uploader) {
+        continue;
+      }
+
+      record.creatorId = owner.id;
+      record.creatorName = owner.nickname;
+      await connection.query(
+        `UPDATE \`${table}\` SET json_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [JSON.stringify(record), row.id]
+      );
+    }
+  }
+}
+
 async function normalizeProductionIds(connection) {
   const [rows] = await connection.query(
     'SELECT id, json_data FROM production ORDER BY id FOR UPDATE'
@@ -260,6 +311,16 @@ const MIGRATIONS = Object.freeze([
     version: '007_seed_minimax_model',
     transactional: false,
     up: seedMiniMaxModel
+  },
+  {
+    version: '008_backfill_user_permissions',
+    transactional: true,
+    up: backfillUserPermissions
+  },
+  {
+    version: '009_backfill_owner_scoped_resources',
+    transactional: true,
+    up: backfillOwnerScopedResources
   }
 ]);
 

@@ -10,7 +10,7 @@ import {
 } from '../../server/auth/passwords.js';
 
 class FakeMigrationDatabase {
-  constructor({ users = [], production = [], aiModels = [] } = {}) {
+  constructor({ users = [], production = [], aiModels = [], clients = [], equipment = [], docs = [] } = {}) {
     this.users = new Map(users.map(record => [record.id, structuredClone(record)]));
     this.production = new Map(
       production.map(record => [record.rowId, structuredClone(record.data)])
@@ -18,6 +18,9 @@ class FakeMigrationDatabase {
     this.aiModels = new Map(
       aiModels.map(model => [model.id, structuredClone(model)])
     );
+    this.clients = new Map(clients.map(record => [record.id, structuredClone(record)]));
+    this.equipment = new Map(equipment.map(record => [record.id, structuredClone(record)]));
+    this.docs = new Map(docs.map(record => [record.id, structuredClone(record)]));
     this.migrations = new Set();
     this.snapshot = null;
   }
@@ -31,6 +34,9 @@ class FakeMigrationDatabase {
       users: structuredClone(this.users),
       production: structuredClone(this.production),
       aiModels: structuredClone(this.aiModels),
+      clients: structuredClone(this.clients),
+      equipment: structuredClone(this.equipment),
+      docs: structuredClone(this.docs),
       migrations: structuredClone(this.migrations)
     };
   }
@@ -44,6 +50,9 @@ class FakeMigrationDatabase {
     this.users = this.snapshot.users;
     this.production = this.snapshot.production;
     this.aiModels = this.snapshot.aiModels;
+    this.clients = this.snapshot.clients;
+    this.equipment = this.snapshot.equipment;
+    this.docs = this.snapshot.docs;
     this.migrations = this.snapshot.migrations;
     this.snapshot = null;
   }
@@ -70,6 +79,22 @@ class FakeMigrationDatabase {
       const [json, id] = parameters;
       this.users.set(id, JSON.parse(json));
       return [{ affectedRows: 1 }, []];
+    }
+
+
+    for (const table of ['clients', 'equipment', 'docs']) {
+      if (normalized.startsWith(`SELECT id, json_data FROM \`${table}\``)) {
+        return [[...this[table]].map(([id, data]) => ({
+          id,
+          json_data: JSON.stringify(data)
+        })), []];
+      }
+
+      if (normalized.startsWith(`UPDATE \`${table}\` SET json_data`)) {
+        const [json, id] = parameters;
+        this[table].set(id, JSON.parse(json));
+        return [{ affectedRows: 1 }, []];
+      }
     }
 
     if (normalized.startsWith('SELECT id, json_data FROM production')) {
@@ -243,6 +268,39 @@ test('maintenance audit storage is added through an idempotent additive migratio
   assert.equal(database.migrations.has('006_create_maintenance_jobs'), true);
 });
 
-test('MiniMax seed is the latest additive migration', () => {
-  assert.equal(MIGRATION_VERSIONS.at(-1), '007_seed_minimax_model');
+test('user permission migration keeps legacy accounts writable explicitly', async () => {
+  const database = new FakeMigrationDatabase({
+    users: [
+      { id: 'u-1', username: 'legacy', nickname: 'legacy', password: 'scrypt$v1$hash', role: 'User' },
+      { id: 'u-2', username: 'readonly', nickname: 'readonly', password: 'scrypt$v1$hash', role: 'User', permission: 'Read' }
+    ]
+  });
+
+  await runMigrations(database);
+
+  assert.equal(database.users.get('u-1').permission, 'ReadWrite');
+  assert.equal(database.users.get('u-2').permission, 'Read');
+  assert.equal(database.migrations.has('008_backfill_user_permissions'), true);
+});
+
+test('owner-scoped resource migration assigns legacy shared records to the default administrator', async () => {
+  const admin = { id: 'u-admin', username: 'admin', nickname: '管理员', password: 'scrypt$v1$hash', role: 'Admin', isDefaultAdmin: true };
+  const database = new FakeMigrationDatabase({
+    users: [admin],
+    clients: [{ id: 'c-1', companyName: '旧客户' }],
+    equipment: [{ id: 'e-1', name: '旧设备' }],
+    docs: [{ id: 'd-1', title: '旧文档' }]
+  });
+
+  await runMigrations(database, { passwordHasher: async value => value });
+
+  assert.equal(database.clients.get('c-1').creatorId, 'u-admin');
+  assert.equal(database.equipment.get('e-1').creatorName, '管理员');
+  assert.equal(database.docs.get('d-1').creatorId, 'u-admin');
+  assert.equal(database.migrations.has('009_backfill_owner_scoped_resources'), true);
+});
+
+test('permission backfill and scoped owner backfill are the latest additive migrations', () => {
+  assert.equal(MIGRATION_VERSIONS.at(-2), '008_backfill_user_permissions');
+  assert.equal(MIGRATION_VERSIONS.at(-1), '009_backfill_owner_scoped_resources');
 });
