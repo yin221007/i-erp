@@ -67,14 +67,32 @@ const UserPreferencesModal = lazy(
 );
 const AICenter = lazy(() => import('./components/AICenter'));
 const RecycleBin = lazy(() => import('./components/RecycleBin'));
+const HomeDashboard = lazy(() => import('./components/HomeDashboard'));
+
+type NavigationContext = {
+  projectId?: string;
+  productionProjectId?: string;
+  paymentId?: string;
+  paymentProjectId?: string;
+  returnToHomeDrilldown?: {
+    title: string;
+    subtitle: string;
+    entries: any[];
+    emptyText: string;
+  };
+};
 
 function App() {
   // ==================================================================================
   // 1. UI STATE MANAGEMENT
   // ==================================================================================
-  const [activeView, setActiveView] = useState<string>('projects');
+  const [activeView, setActiveView] = useState<string>('home');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('ierp_sidebar_collapsed') === '1');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [targetProductionProjectId, setTargetProductionProjectId] = useState<string | null>(null);
+  const [targetPaymentFocus, setTargetPaymentFocus] = useState<{ paymentId?: string; projectId?: string } | null>(null);
+  const [homeReturnDrilldown, setHomeReturnDrilldown] = useState<NavigationContext['returnToHomeDrilldown'] | null>(null);
   const [isLoaded, setIsLoaded] = useState<boolean>(false); 
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'offline' | 'connecting'>('connecting');
   
@@ -164,6 +182,10 @@ function App() {
   // ==================================================================================
   // 3. EFFECTS & INITIALIZATION
   // ==================================================================================
+
+  useEffect(() => {
+      localStorage.setItem('ierp_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
       if (theme === 'dark') {
@@ -393,6 +415,21 @@ function App() {
       } catch (error) {
           console.error(`[Sync Engine] Fatal for ${resource}:`, error);
           throw error;
+      }
+  };
+
+  const rollbackAfterSyncFailure = (message = '同步失败，已恢复服务器最新数据') => {
+      notify(message, 'error', undefined, 'System');
+      fetchData();
+  };
+
+  const syncToBackendOrRollback = async (resource: string, method: string, data: any, id?: string, failureMessage?: string) => {
+      try {
+          await syncToBackend(resource, method, data, id);
+          return true;
+      } catch {
+          rollbackAfterSyncFailure(failureMessage);
+          return false;
       }
   };
 
@@ -663,7 +700,7 @@ function App() {
       try { 
           await syncToBackend('projects', 'PUT', updatedProject, updatedProject.id); 
           notify('项目更新成功', 'success'); 
-      } catch (e) { notify('同步失败', 'error'); }
+      } catch (e) { rollbackAfterSyncFailure('项目更新失败，已恢复服务器最新数据'); }
   };
   
   const handleAddProject = async (projectPart: Partial<Project>) => {
@@ -688,7 +725,7 @@ function App() {
       try { 
           await syncToBackend('projects', 'POST', newProject); 
           notify('项目创建成功', 'success'); 
-      } catch (e) { notify('创建失败', 'error'); }
+      } catch (e) { rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据'); }
   };
 
   const handleDeleteProject = async (projectId: string) => {
@@ -700,7 +737,7 @@ function App() {
               await syncToBackend('projects', 'DELETE', {}, id);
               notify('项目已移至回收站', 'info'); 
               fetchData();
-          } catch (e) { notify('删除失败', 'error'); }
+          } catch (e) { rollbackAfterSyncFailure('项目删除失败，已恢复服务器最新数据'); }
       });
   };
 
@@ -718,7 +755,7 @@ function App() {
       try { 
           await syncToBackend('users', 'POST', user); 
           notify('用户创建成功', 'success'); 
-      } catch (e) { notify('创建失败', 'error'); }
+      } catch (e) { rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据'); }
   };
 
   const handleUpdateUser = async (user: User) => {
@@ -727,7 +764,7 @@ function App() {
       try { 
           await syncToBackend('users', 'PUT', user, user.id); 
           notify('用户资料已更新', 'success'); 
-      } catch (e) { notify('同步失败', 'error'); }
+      } catch (e) { rollbackAfterSyncFailure('用户资料更新失败，已恢复服务器最新数据'); }
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -737,17 +774,17 @@ function App() {
           setUsers(prev => prev.filter(u => u.id !== userId));
           notify('用户已注销', 'success'); 
           fetchData(); 
-      } catch (e) { notify('注销失败', 'error'); }
+      } catch (e) { rollbackAfterSyncFailure('注销失败，已恢复服务器最新数据'); }
   };
 
   const handleAddClient = (client: Client) => {
       setClients(p => [...p, client]);
-      syncToBackend('clients', 'POST', client);
+      void syncToBackendOrRollback('clients', 'POST', client, undefined, '客户创建失败，已恢复服务器最新数据');
   };
   
   const handleUpdateClient = (client: Client) => {
       setClients(p => p.map(c => c.id === client.id ? client : c));
-      syncToBackend('clients', 'PUT', client, client.id);
+      void syncToBackendOrRollback('clients', 'PUT', client, client.id, '客户更新失败，已恢复服务器最新数据');
   };
   
   const handleDeleteClient = (id: string) => {
@@ -755,7 +792,7 @@ function App() {
       if (!client) return;
       handleProtectedDelete(client, 'clients', client.companyName, (id) => {
           setClients(p => p.filter(c => c.id !== id));
-          syncToBackend('clients', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('clients', 'DELETE', {}, id, '客户删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
@@ -768,12 +805,12 @@ function App() {
   const handleAddEquipment = (eq: Equipment) => {
       const newEq = { ...eq, createdAt: new Date().toISOString() };
       setEquipment(p => [...p, newEq]);
-      syncToBackend('equipment', 'POST', newEq);
+      void syncToBackendOrRollback('equipment', 'POST', newEq, undefined, '设备创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdateEquipment = (eq: Equipment) => {
       setEquipment(p => p.map(e => e.id === eq.id ? eq : e));
-      syncToBackend('equipment', 'PUT', eq, eq.id);
+      void syncToBackendOrRollback('equipment', 'PUT', eq, eq.id, '设备更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteEquipment = (id: string) => {
@@ -781,19 +818,19 @@ function App() {
       if (!eq) return;
       handleProtectedDelete(eq, 'equipment', eq.name, (id) => {
           setEquipment(p => p.filter(e => e.id !== id));
-          syncToBackend('equipment', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('equipment', 'DELETE', {}, id, '设备删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
   const handleAddArchive = (archive: ArchiveItem) => {
       const newArc = { ...archive, createdAt: new Date().toISOString() };
       setArchives(p => [...p, newArc]);
-      syncToBackend('archives', 'POST', newArc);
+      void syncToBackendOrRollback('archives', 'POST', newArc, undefined, '档案创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdateArchive = (updatedArchive: ArchiveItem) => {
       setArchives(prev => prev.map(a => a.id === updatedArchive.id ? updatedArchive : a));
-      syncToBackend('archives', 'PUT', updatedArchive, updatedArchive.id);
+      void syncToBackendOrRollback('archives', 'PUT', updatedArchive, updatedArchive.id, '档案更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteArchive = (id: string) => {
@@ -819,7 +856,7 @@ function App() {
                   if (hasChanges) {
                       // 如果项目发生了变化，异步推送到后端
                       const updatedProject = { ...project, nodes: updatedNodes };
-                      syncToBackend('projects', 'PUT', updatedProject, updatedProject.id);
+                      void syncToBackendOrRollback('projects', 'PUT', updatedProject, updatedProject.id, '项目附件同步失败，已恢复服务器最新数据');
                       return updatedProject;
                   }
                   return project;
@@ -832,19 +869,19 @@ function App() {
               await syncToBackend('archives', 'DELETE', {}, id);
               notify('档案已移至回收站', 'info'); 
               fetchData();
-          } catch (e) { notify('删除同步失败', 'error'); }
+          } catch (e) { rollbackAfterSyncFailure('档案删除失败，已恢复服务器最新数据'); }
       });
   };
 
   const handleAddDoc = (doc: DocItem) => {
       const newDoc = { ...doc, createdAt: new Date().toISOString() };
       setDocs(p => [...p, newDoc]);
-      syncToBackend('docs', 'POST', newDoc);
+      void syncToBackendOrRollback('docs', 'POST', newDoc, undefined, '文档创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdateDoc = (doc: DocItem) => {
       setDocs(p => p.map(d => d.id === doc.id ? doc : d));
-      syncToBackend('docs', 'PUT', doc, doc.id);
+      void syncToBackendOrRollback('docs', 'PUT', doc, doc.id, '文档更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteDoc = (id: string) => {
@@ -852,14 +889,14 @@ function App() {
       if (!doc) return;
       handleProtectedDelete(doc, 'docs', doc.title, (id) => {
           setDocs(p => p.filter(d => d.id !== id));
-          syncToBackend('docs', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('docs', 'DELETE', {}, id, '文档删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
   const handleAddScheduleItem = (item: ScheduleItem) => {
       const newItem = { ...item, createdAt: new Date().toISOString(), userId: currentUser.id };
       setSchedule(p => [...p, newItem]);
-      syncToBackend('schedule', 'POST', newItem);
+      void syncToBackendOrRollback('schedule', 'POST', newItem, undefined, '日程创建失败，已恢复服务器最新数据');
   };
 
   const handleCompleteScheduleItem = (id: string) => {
@@ -867,7 +904,7 @@ function App() {
       if (!item) return;
       const updated = { ...item, isCompleted: true };
       setSchedule(p => p.map(s => s.id === id ? updated : s));
-      syncToBackend('schedule', 'PUT', updated, id);
+      void syncToBackendOrRollback('schedule', 'PUT', updated, id, '日程更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteScheduleItem = (id: string) => {
@@ -875,7 +912,7 @@ function App() {
       if (!item) return;
       handleProtectedDelete(item, 'schedule', item.title, (id) => {
           setSchedule(p => p.filter(s => s.id !== id));
-          syncToBackend('schedule', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('schedule', 'DELETE', {}, id, '日程删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
@@ -886,7 +923,7 @@ function App() {
           if (exists) return prev.map(i => i.id === normalized.id ? normalized : i);
           return [...prev, normalized];
       });
-      syncToBackend('production', 'POST', normalized);
+      void syncToBackendOrRollback('production', 'POST', normalized, undefined, '生产数据同步失败，已恢复服务器最新数据');
   };
 
   const handleDeleteProduction = (projectId: string) => {
@@ -894,34 +931,34 @@ function App() {
       if (!prod) return;
       handleProtectedDelete(prod, 'production', prod.projectName, (id) => {
           setProductionData(prev => prev.filter(p => p.id !== id));
-          syncToBackend('production', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('production', 'DELETE', {}, id, '生产数据删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
   const handleAddApproval = (approval: Approval) => {
       setApprovals(p => [...p, approval]);
-      syncToBackend('approvals', 'POST', approval);
+      void syncToBackendOrRollback('approvals', 'POST', approval, undefined, '审批创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdateApproval = (approval: Approval) => {
       setApprovals(p => p.map(a => a.id === approval.id ? approval : a));
-      syncToBackend('approvals', 'PUT', approval, approval.id);
+      void syncToBackendOrRollback('approvals', 'PUT', approval, approval.id, '审批更新失败，已恢复服务器最新数据');
   };
 
   const onDeleteApproval = (id: string) => {
       setApprovals(p => p.filter(a => a.id !== id));
-      syncToBackend('approvals', 'DELETE', {}, id).then(() => fetchData());
+      void syncToBackendOrRollback('approvals', 'DELETE', {}, id, '审批删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
   };
 
   const handleAddPayment = (payment: PaymentRecord) => {
       const newPay = { ...payment, createdAt: new Date().toISOString(), creatorId: currentUser.id };
       setPaymentRecords(p => [...p, newPay]);
-      syncToBackend('payments', 'POST', newPay);
+      void syncToBackendOrRollback('payments', 'POST', newPay, undefined, '回款记录创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdatePayment = (payment: PaymentRecord) => {
       setPaymentRecords(p => p.map(pr => pr.id === payment.id ? payment : pr));
-      syncToBackend('payments', 'PUT', payment, payment.id);
+      void syncToBackendOrRollback('payments', 'PUT', payment, payment.id, '回款记录更新失败，已恢复服务器最新数据');
   };
 
   const handleDeletePayment = (id: string) => {
@@ -929,18 +966,18 @@ function App() {
       if (!pay) return;
       handleProtectedDelete(pay, 'payments', pay.projectName, (id) => {
           setPaymentRecords(p => p.filter(pr => pr.id !== id));
-          syncToBackend('payments', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('payments', 'DELETE', {}, id, '回款记录删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
   const handleAddWorkLog = (log: WorkLogEntry) => {
       setWorkLogs(p => [...p, log]);
-      syncToBackend('worklogs', 'POST', log);
+      void syncToBackendOrRollback('worklogs', 'POST', log, undefined, '工作记录创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdateWorkLog = (log: WorkLogEntry) => {
       setWorkLogs(p => p.map(l => l.id === log.id ? log : l));
-      syncToBackend('worklogs', 'PUT', log, log.id);
+      void syncToBackendOrRollback('worklogs', 'PUT', log, log.id, '工作记录更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteWorkLog = (id: string) => {
@@ -948,49 +985,49 @@ function App() {
       if (!log) return;
       handleProtectedDelete(log, 'worklogs', `${log.userName} ${log.date} 工时`, (id) => {
           setWorkLogs(p => p.filter(l => l.id !== id));
-          syncToBackend('worklogs', 'DELETE', {}, id).then(() => fetchData());
+          void syncToBackendOrRollback('worklogs', 'DELETE', {}, id, '工作记录删除失败，已恢复服务器最新数据').then((ok) => { if (ok) fetchData(); });
       });
   };
 
   const handleSendMessage = (msg: ChatMessage) => {
       setMessages(p => [...p, msg]);
-      syncToBackend('messages', 'POST', msg);
+      void syncToBackendOrRollback('messages', 'POST', msg, undefined, '消息发送失败，已恢复服务器最新数据');
   };
 
   const handleDeleteMessage = (id: string) => {
       setMessages(p => p.filter(m => m.id !== id));
-      syncToBackend('messages', 'DELETE', {}, id);
+      void syncToBackendOrRollback('messages', 'DELETE', {}, id, '消息删除失败，已恢复服务器最新数据');
   };
 
   const handleAddChannel = (ch: ChatChannel) => {
       setChannels(p => [...p, ch]);
-      syncToBackend('channels', 'POST', ch);
+      void syncToBackendOrRollback('channels', 'POST', ch, undefined, '频道创建失败，已恢复服务器最新数据');
   };
 
   const handleUpdateChannel = (ch: ChatChannel) => {
       setChannels(p => p.map(c => c.id === ch.id ? ch : c));
-      syncToBackend('channels', 'PUT', ch, ch.id);
+      void syncToBackendOrRollback('channels', 'PUT', ch, ch.id, '频道更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteChannel = (id: string) => {
       setChannels(p => p.filter(c => c.id !== id));
-      syncToBackend('channels', 'DELETE', {}, id);
+      void syncToBackendOrRollback('channels', 'DELETE', {}, id, '频道删除失败，已恢复服务器最新数据');
   };
 
   const handleAddAnnouncement = (ann: ChatAnnouncement) => {
       setAnnouncements(p => [...p, ann]);
-      syncToBackend('announcements', 'POST', ann);
+      void syncToBackendOrRollback('announcements', 'POST', ann, undefined, '公告发布失败，已恢复服务器最新数据');
       setSessionAnnouncementsRead(false);
   };
 
   const handleUpdateAnnouncement = (ann: ChatAnnouncement) => {
       setAnnouncements(p => p.map(a => a.id === ann.id ? ann : a));
-      syncToBackend('announcements', 'PUT', ann, ann.id);
+      void syncToBackendOrRollback('announcements', 'PUT', ann, ann.id, '公告更新失败，已恢复服务器最新数据');
   };
 
   const handleDeleteAnnouncement = (id: string) => {
       setAnnouncements(p => p.filter(a => a.id !== id));
-      syncToBackend('announcements', 'DELETE', {}, id);
+      void syncToBackendOrRollback('announcements', 'DELETE', {}, id, '公告删除失败，已恢复服务器最新数据');
   };
 
   const handleRestoreRecycleItem = async (id: string) => {
@@ -1027,12 +1064,12 @@ function App() {
   const handleSendAiMessage = (msg: any) => {
       const msgWithUser = { ...msg, userId: currentUser.id };
       setAiMessages(prev => [...prev, msgWithUser]);
-      syncToBackend('ai_messages', 'POST', msgWithUser);
+      void syncToBackendOrRollback('ai_messages', 'POST', msgWithUser, undefined, 'AI 会话保存失败，已恢复服务器最新数据');
   };
 
   const handleDeleteAiMessage = (id: string) => {
       setAiMessages(prev => prev.filter(m => m.id !== id));
-      syncToBackend('ai_messages', 'DELETE', {}, id);
+      void syncToBackendOrRollback('ai_messages', 'DELETE', {}, id, 'AI 会话删除失败，已恢复服务器最新数据');
   };
 
   const handleClearAiHistory = async () => {
@@ -1061,7 +1098,7 @@ function App() {
     try {
         await syncToBackend('settings', 'PUT', newSettings, 'global_config');
         notify('系统设置已同步', 'success');
-    } catch (e) { notify('设置同步失败', 'error'); }
+    } catch (e) { rollbackAfterSyncFailure('设置同步失败，已恢复服务器最新数据'); }
   };
 
   const handleSaveUserPrefs = async (newPrefs: UserPreferences) => {
@@ -1078,7 +1115,7 @@ function App() {
             JSON.stringify(newPrefs)
           );
           notify('偏好设置已同步', 'success');
-      } catch (e) { notify('同步失败', 'error'); }
+      } catch (e) { rollbackAfterSyncFailure('偏好设置同步失败，已恢复服务器最新数据'); }
   };
 
   const handleLogout = async () => {
@@ -1091,9 +1128,20 @@ function App() {
     notify('已退出', 'info');
   };
 
-  const handleNavigate = (view: string) => {
+  const handleNavigate = (view: string, context: NavigationContext = {}) => {
+    if (view === 'projects') {
+      setSelectedProject(context.projectId ? projects.find(project => project.id === context.projectId) || null : null);
+      setHomeReturnDrilldown(context.returnToHomeDrilldown || null);
+    } else if (view === 'home') {
+      setSelectedProject(null);
+    }
+
+    const productionTarget = context.productionProjectId || context.projectId || null;
+    const paymentProjectId = context.paymentProjectId || context.projectId;
+    const paymentTarget = context.paymentId || paymentProjectId ? { paymentId: context.paymentId, projectId: paymentProjectId } : null;
+    setTargetProductionProjectId(view === 'production' ? productionTarget : null);
+    setTargetPaymentFocus(view === 'payments' ? paymentTarget : null);
     setActiveView(view);
-    if (view === 'projects') setSelectedProject(null);
     if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
@@ -1149,6 +1197,8 @@ function App() {
           onNavigate={handleNavigate} 
           isOpen={sidebarOpen} 
           onClose={() => setSidebarOpen(false)} 
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
           currentUser={currentUser} 
           settings={displaySettings}
           onOpenSettings={() => setIsSettingsOpen(true)} 
@@ -1176,13 +1226,34 @@ function App() {
         />
         <main className={`flex-1 overflow-y-auto ${activeView === 'chat' ? 'p-0' : 'p-4 md:p-8'}`}>
           <Suspense fallback={<div className="p-8 text-sm font-black text-slate-400">正在加载模块...</div>}>
+            {activeView === 'home' && (
+              <HomeDashboard
+                projects={projects}
+                schedule={schedule}
+                paymentRecords={paymentRecords}
+                productionData={productionData}
+                approvals={approvals}
+                archives={archives}
+                workLogs={workLogs}
+                messages={messages}
+                channels={channels}
+                announcements={announcements}
+                currentUser={currentUser}
+                users={users}
+                chatUnreadCount={chatUnreadCount}
+                pendingApprovalCount={pendingApprovalCount}
+                onNavigate={handleNavigate}
+                restoreDrilldown={homeReturnDrilldown}
+                onRestoreDrilldownConsumed={() => setHomeReturnDrilldown(null)}
+              />
+            )}
             {activeView === 'projects' && (selectedProject ? 
-                <ProjectWorkflow project={selectedProject} nodes={selectedProject.nodes} onUpdateNode={handleUpdateWorkflowNode} onUpdateProject={handleUpdateProject} onBack={() => setSelectedProject(null)} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} archives={archives.filter(a => a.projectId === selectedProject.id)} currentUser={currentUser} users={users}/> :
+                <ProjectWorkflow project={selectedProject} nodes={selectedProject.nodes} onUpdateNode={handleUpdateWorkflowNode} onUpdateProject={handleUpdateProject} onBack={() => { if (homeReturnDrilldown) { setSelectedProject(null); setActiveView('home'); } else { setSelectedProject(null); } }} backLabel={homeReturnDrilldown ? '返回首页明细' : '返回项目台账'} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} archives={archives.filter(a => a.projectId === selectedProject.id)} currentUser={currentUser} users={users}/> :
                 <ProjectList projects={projects} users={users} clients={clients} onSelectProject={setSelectedProject} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onAddProject={handleAddProject} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} currentUser={currentUser} onAddApproval={handleAddApproval}/>
             )}
-            {activeView === 'production' && <ProductionProgress projects={projects} productionData={productionData} onUpdateProject={handleUpdateProduction} onDeleteProjectProduction={handleDeleteProduction} currentUser={currentUser} />}
+            {activeView === 'production' && <ProductionProgress projects={projects} productionData={productionData} onUpdateProject={handleUpdateProduction} onDeleteProjectProduction={handleDeleteProduction} currentUser={currentUser} initialProjectId={targetProductionProjectId} />}
             {activeView === 'approvals' && <ApprovalManager approvals={approvals} users={users} currentUser={currentUser} onAddApproval={handleAddApproval} onUpdateApproval={handleUpdateApproval} onDeleteApproval={onDeleteApproval} />}
-            {activeView === 'payments' && <PaymentDashboard payments={paymentRecords} projects={projects} users={users} clients={clients} onAddPayment={handleAddPayment} onUpdatePayment={handleUpdatePayment} onDeletePayment={handleDeletePayment} currentUser={currentUser} />}
+            {activeView === 'payments' && <PaymentDashboard payments={paymentRecords} projects={projects} users={users} clients={clients} archives={archives} onAddPayment={handleAddPayment} onUpdatePayment={handleUpdatePayment} onDeletePayment={handleDeletePayment} currentUser={currentUser} focusTarget={targetPaymentFocus} />}
             {activeView === 'schedule' && <DailySchedule schedule={schedule} projects={projects} users={users} onCompleteItem={handleCompleteScheduleItem} onDeleteItem={handleDeleteScheduleItem} onAddItem={handleAddScheduleItem} currentUser={currentUser} onDeleteUser={handleDeleteUser}/>}
             {/* Fix: Changed handleUpdateLog to handleUpdateWorkLog to match defined function name */}
             {activeView === 'worklogs' && <WorkLogManager logs={workLogs} users={users} currentUser={currentUser} onAddLog={handleAddWorkLog} onUpdateLog={handleUpdateWorkLog} onDeleteLog={handleDeleteWorkLog} />}
@@ -1200,7 +1271,7 @@ function App() {
       </div>
       <Suspense fallback={null}>
         <SystemSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={appSettings} onSave={handleSaveSettings} />
-        <UserPreferencesModal isOpen={isUserPrefsOpen} onClose={() => setIsUserPrefsOpen(false)} preferences={userPrefs} onSave={handleSaveUserPrefs} />
+        <UserPreferencesModal isOpen={isUserPrefsOpen} onClose={() => setIsUserPrefsOpen(false)} preferences={userPrefs} onSave={handleSaveUserPrefs} theme={theme} onThemeChange={setTheme} />
       </Suspense>
     </div>
   );

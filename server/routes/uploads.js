@@ -34,16 +34,29 @@ const allowedTypes = new Map([
   ['.7z', new Set(['application/x-7z-compressed'])],
   ['.dwg', new Set([
     'application/acad',
+    'application/dwg',
     'application/x-acad',
+    'application/x-autocad',
+    'application/x-dwg',
     'application/octet-stream',
-    'image/vnd.dwg'
+    'application/vnd.dwg',
+    'drawing/dwg',
+    'drawing/x-dwg',
+    'image/vnd.dwg',
+    'image/x-dwg'
   ])],
   ['.dxf', new Set([
     'application/dxf',
     'application/x-dxf',
+    'application/x-autocad',
     'application/octet-stream',
-    'image/vnd.dxf'
+    'image/vnd.dxf',
+    'image/x-dxf'
   ])],
+  ['.rvt', new Set(['application/octet-stream'])],
+  ['.rfa', new Set(['application/octet-stream'])],
+  ['.skp', new Set(['application/octet-stream', 'application/vnd.sketchup.skp'])],
+  ['.ifc', new Set(['application/octet-stream', 'application/x-step', 'text/plain'])],
   ['.mp4', new Set(['video/mp4'])],
   ['.mov', new Set(['video/quicktime'])],
   ['.webm', new Set(['video/webm'])],

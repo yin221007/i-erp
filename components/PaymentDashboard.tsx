@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo, useRef } from 'react';
-import { PaymentRecord, Project, User, Client } from '../types';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { PaymentRecord, Project, User, Client, ArchiveItem } from '../types';
 import { Search, Plus, Edit2, Trash2, Save, X, Calculator, AlertTriangle, ShieldCheck, Download, Upload, JapaneseYen, Wallet, FileCheck } from 'lucide-react';
 
 interface PaymentDashboardProps {
@@ -8,10 +8,12 @@ interface PaymentDashboardProps {
   projects: Project[];
   users: User[];
   clients: Client[];
+  archives: ArchiveItem[];
   onAddPayment: (payment: PaymentRecord) => void;
   onUpdatePayment: (payment: PaymentRecord) => void;
   onDeletePayment: (id: string) => void;
   currentUser: User;
+  focusTarget?: { paymentId?: string; projectId?: string } | null;
 }
 
 const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ 
@@ -19,16 +21,27 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
   projects, 
   users, 
   clients, 
+  archives,
   onAddPayment, 
   onUpdatePayment, 
   onDeletePayment, 
-  currentUser 
+  currentUser,
+  focusTarget
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PaymentRecord | null>(null);
+  const [invoicePreviewItem, setInvoicePreviewItem] = useState<ArchiveItem | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    const focusedPayment = focusTarget.paymentId ? payments.find(payment => payment.id === focusTarget.paymentId) : null;
+    const focusedProject = focusTarget.projectId ? projects.find(project => project.id === focusTarget.projectId) : null;
+    const keyword = focusedPayment?.projectName || focusedProject?.name || '';
+    if (keyword) setSearchTerm(keyword);
+  }, [focusTarget, payments, projects]);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -71,6 +84,26 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
     return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(amount);
   };
 
+  const getArchiveDownloadUrl = (url?: string) => url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '#';
+
+  const findInvoiceArchive = (payment: PaymentRecord) => archives.find(archive =>
+    archive.category === 'Invoice' && (
+      Boolean(payment.projectId && archive.projectId === payment.projectId) ||
+      archive.projectName === payment.projectName ||
+      archive.title.includes(payment.projectName)
+    )
+  );
+
+  const openInvoicePreview = (payment: PaymentRecord) => {
+    if ((payment.invoicedAmount || 0) <= 0) return;
+    const archive = findInvoiceArchive(payment);
+    if (!archive) {
+      alert('未找到该工程关联的财务发票档案，请先在工程档案中归档发票');
+      return;
+    }
+    setInvoicePreviewItem(archive);
+  };
+
   const calculateRemaining = (payment: PaymentRecord) => {
     const received = payment.receivedAmount || 0;
     if (payment.auditedAmount > 0) {
@@ -86,6 +119,45 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
     if (total <= 0) return 0;
     return Math.min(Math.round((payment.receivedAmount / total) * 100), 100);
   };
+
+  const getPaymentGroup = (payment: PaymentRecord) => {
+    const remaining = calculateRemaining(payment);
+    const progress = calculateProgress(payment);
+    if (remaining <= 0 && progress >= 100) return { key: 'paid', label: '已100%回款', rank: 3 };
+    if (!payment.finalPaymentDueDate) return { key: 'planned', label: '计划中', rank: 2 };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const due = new Date(payment.finalPaymentDueDate);
+    due.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((due.getTime() - today.getTime()) / 86400000);
+    if (diffDays < 0) return { key: 'overdue', label: '已逾期', rank: 0 };
+    if (diffDays <= 15) return { key: 'due-soon', label: '15天内到期', rank: 1 };
+    return { key: 'planned', label: '计划中', rank: 2 };
+  };
+
+  const sortedPayments = useMemo(() => (
+    filteredPayments
+      .map((payment, index) => ({ payment, index, group: getPaymentGroup(payment) }))
+      .sort((a, b) => {
+        if (a.group.rank !== b.group.rank) return a.group.rank - b.group.rank;
+        const aTime = a.payment.finalPaymentDueDate ? new Date(a.payment.finalPaymentDueDate).getTime() : Number.MAX_SAFE_INTEGER;
+        const bTime = b.payment.finalPaymentDueDate ? new Date(b.payment.finalPaymentDueDate).getTime() : Number.MAX_SAFE_INTEGER;
+        if (aTime !== bTime) return aTime - bTime;
+        return a.index - b.index;
+      })
+      .map(({ payment }) => payment)
+  ), [filteredPayments]);
+
+  const groupedPayments = useMemo(() => {
+    const groups: { key: string; label: string; items: PaymentRecord[] }[] = [];
+    sortedPayments.forEach(payment => {
+      const group = getPaymentGroup(payment);
+      const existing = groups.find(item => item.key === group.key);
+      if (existing) existing.items.push(payment);
+      else groups.push({ key: group.key, label: group.label, items: [payment] });
+    });
+    return groups;
+  }, [sortedPayments]);
 
   const handleOpenAdd = () => {
     setEditingItem(null);
@@ -304,9 +376,9 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
               <div className="p-2.5 bg-primary-600 rounded-2xl shadow-xl shadow-primary-500/20">
                 <Calculator className="w-6 h-6 text-white" />
               </div>
-              <h2 className="text-3xl font-black text-slate-900 dark:text-white transition-colors tracking-tight">工程回款决策看板</h2>
+              <h2 className="text-3xl font-black text-slate-900 dark:text-white transition-colors tracking-tight">工程回款台账</h2>
            </div>
-           <p className="text-slate-500 dark:text-slate-400 font-bold ml-12">集中化监控工程结算偏差、回款效率及财务风险预警</p>
+           <p className="text-slate-500 dark:text-slate-400 font-bold ml-12">按工程查看合同额、已回款、尾款和到期风险，满额回款项目高亮显示</p>
         </div>
         
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
@@ -355,12 +427,12 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
       {/* 增强型统计卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10 transition-all">
           {[
-              { label: '在研项目合同总值', value: filteredPayments.reduce((acc, curr) => acc + (curr.contractAmount || 0), 0), color: 'border-slate-600', hover: 'hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/70', icon: JapaneseYen, trend: '合同原价累计' },
-              { label: '累计资金回笼总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.receivedAmount || 0), 0), color: 'border-emerald-500', hover: 'hover:bg-emerald-50 hover:border-emerald-300 dark:hover:bg-emerald-950/40', icon: Wallet, trend: '实到资金' },
-              { label: '财务应收尾款总计', value: filteredPayments.reduce((acc, curr) => acc + calculateRemaining(curr), 0), color: 'border-orange-500', hover: 'hover:bg-orange-50 hover:border-orange-300 dark:hover:bg-orange-950/40', icon: AlertTriangle, trend: '风险敞口' },
-              { label: '已开票业务总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.invoicedAmount || 0), 0), color: 'border-primary-500', hover: 'hover:bg-primary-50 hover:border-primary-300 dark:hover:bg-primary-950/40', icon: FileCheck, trend: '票据关联额' }
+              { label: '合同总额', value: filteredPayments.reduce((acc, curr) => acc + (curr.contractAmount || 0), 0), color: 'border-slate-600', hover: 'hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/70', icon: JapaneseYen, trend: '合同原价累计' },
+              { label: '已回款', value: filteredPayments.reduce((acc, curr) => acc + (curr.receivedAmount || 0), 0), color: 'border-emerald-500', hover: 'hover:bg-emerald-50 hover:border-emerald-300 dark:hover:bg-emerald-950/40', icon: Wallet, trend: '实到资金' },
+              { label: '未回款', value: filteredPayments.reduce((acc, curr) => acc + calculateRemaining(curr), 0), color: 'border-orange-500', hover: 'hover:bg-orange-50 hover:border-orange-300 dark:hover:bg-orange-950/40', icon: AlertTriangle, trend: '风险敞口' },
+              { label: '已开票', value: filteredPayments.reduce((acc, curr) => acc + (curr.invoicedAmount || 0), 0), color: 'border-primary-500', hover: 'hover:bg-primary-50 hover:border-primary-300 dark:hover:bg-primary-950/40', icon: FileCheck, trend: '票据关联额' }
           ].map((stat, i) => (
-              <div key={i} className={`bg-white dark:bg-slate-800 p-8 rounded-[2.5rem] border-2 border-slate-100 dark:border-slate-700 border-l-[12px] ${stat.color} ${stat.hover} shadow-sm transition-all transform hover:scale-[1.03] hover:shadow-2xl group cursor-default relative overflow-hidden`}>
+              <div key={i} className={`bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 border-l-4 ${stat.color} ${stat.hover} shadow-sm transition-all transform hover:scale-[1.03] hover:shadow-2xl group cursor-default relative overflow-hidden`}>
                   <div className="flex justify-between items-start mb-4">
                     <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] group-hover:text-primary-600 transition-colors">{stat.label}</p>
                     <stat.icon className="w-5 h-5 text-slate-300 group-hover:text-primary-400 transition-all" />
@@ -377,161 +449,128 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
           ))}
       </div>
 
-      <div className="bg-white dark:bg-slate-800 rounded-[3rem] border-2 border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden transition-all relative">
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full min-w-[1600px] text-sm text-left border-collapse">
-              <thead className="bg-slate-100 dark:bg-slate-900 text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-widest border-b-4 border-slate-200 dark:border-slate-700 transition-colors">
-                  <tr>
-                      <th className="px-8 py-6 w-[280px]">工程名称 / 标识</th>
-                      <th className="px-6 py-6">进度</th>
-                      <th className="px-6 py-6">负责人 / 甲方</th>
-                      <th className="px-6 py-6 text-right">审定价</th>
-                      <th className="px-6 py-6">条款内容</th>
-                      <th className="px-6 py-6 text-right">已收</th>
-                      <th className="px-6 py-6 text-right">应收余额</th>
-                      <th className="px-6 py-6 text-right">开票</th>
-                      <th className="px-6 py-6 text-center">质保</th>
-                      <th className="px-6 py-6 text-center">尾款到期日</th>
-                      {canAdd && <th className="px-8 py-6 text-center sticky right-0 bg-slate-100 dark:bg-slate-900 shadow-[-20px_0_30px_-10px_rgba(0,0,0,0.1)]">操作</th>}
-                  </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50 transition-all">
-                  {filteredPayments.map((item) => {
-                      const remaining = calculateRemaining(item);
-                      const progress = calculateProgress(item);
-                      const isOverdue = item.finalPaymentDueDate && new Date(item.finalPaymentDueDate) < new Date() && remaining > 0;
-                      const isDueSoon = item.finalPaymentDueDate && new Date(item.finalPaymentDueDate) < new Date(new Date().getTime() + 15 * 86400000) && new Date(item.finalPaymentDueDate) >= new Date() && remaining > 0;
-                      const canEditItem = currentUser.role === 'Admin' || item.managerName === currentUser.nickname || item.creatorId === currentUser.id;
+      <div className="space-y-5 transition-all">
+          {groupedPayments.map(group => (
+            <div key={group.key} className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs font-black tracking-[0.2em] text-slate-500 dark:text-slate-400">{group.label}</h3>
+                <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-slate-400 shadow-sm dark:bg-slate-800 dark:text-slate-500">{group.items.length} 项</span>
+              </div>
+              {group.items.map((item) => {
+              const remaining = calculateRemaining(item);
+              const progress = calculateProgress(item);
+              const displayAmount = item.auditedAmount > 0 ? item.auditedAmount : (item.contractAmount + item.variationAmount);
+              const isOverdue = item.finalPaymentDueDate && new Date(item.finalPaymentDueDate) < new Date() && remaining > 0;
+              const isDueSoon = item.finalPaymentDueDate && new Date(item.finalPaymentDueDate) < new Date(new Date().getTime() + 15 * 86400000) && new Date(item.finalPaymentDueDate) >= new Date() && remaining > 0;
+              const canEditItem = currentUser.role === 'Admin' || item.managerName === currentUser.nickname || item.creatorId === currentUser.id;
+              const isPaidOff = remaining <= 0 && progress >= 100;
+              const isFocused = focusTarget?.paymentId === item.id || Boolean(focusTarget?.projectId && item.projectId === focusTarget.projectId);
 
-                      return (
-                        <tr key={item.id} className="hover:bg-primary-50/40 dark:hover:bg-primary-900/30 group transition-all cursor-default border-l-4 border-transparent hover:border-primary-600">
-                            <td className="px-8 py-6">
-                                <div className="flex flex-col gap-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                       <span className="text-base font-black text-slate-900 dark:text-slate-100 truncate max-w-[200px] group-hover:text-primary-700 transition-colors">{item.projectName}</span>
-                                       {item.projectId && <div title="已关联工程节点" className="p-1 bg-primary-100 dark:bg-primary-900/50 rounded-lg"><FileCheck className="w-3 h-3 text-primary-600" /></div>}
-                                    </div>
-                                    <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 uppercase tracking-tighter">ID: {item.id}</span>
-                                </div>
-                            </td>
-                            
-                            <td className="px-6 py-6">
-                                <div className="w-24">
-                                    <div className="flex justify-between items-end mb-1.5">
-                                        <span className={`text-[10px] font-black ${progress === 100 ? 'text-emerald-600' : 'text-primary-600'}`}>{progress}%</span>
-                                    </div>
-                                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden shadow-inner">
-                                        <div 
-                                            className={`h-full transition-all duration-1000 ease-out rounded-full shadow-[0_0_8px_rgba(37,99,235,0.3)] ${progress === 100 ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-primary-600'}`} 
-                                            style={{ width: `${progress}%` }} 
-                                        />
-                                    </div>
-                                </div>
-                            </td>
+              return (
+                <section key={item.id} className={`group rounded-3xl border-2 px-4 py-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg ${isPaidOff ? 'border-emerald-300 bg-emerald-50/90 dark:border-emerald-700 dark:bg-emerald-950/25' : 'border-slate-200 bg-white hover:border-primary-300 dark:border-slate-600 dark:bg-slate-800 dark:hover:border-primary-600'} ${isFocused ? 'ring-4 ring-primary-500/20 border-primary-400 dark:border-primary-500' : ''}`}>
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className={`truncate text-base font-black ${isPaidOff ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-900 dark:text-white'}`}>{item.projectName}</h3>
+                        {isPaidOff && <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">已100%回款</span>}
+                        {item.projectId && <span className="rounded-full bg-primary-50 px-2.5 py-1 text-[10px] font-black text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">已关联工程</span>}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-bold text-slate-400">
+                        <span>ID: {item.id}</span>
+                        <span>负责人: {item.managerName || '-'}</span>
+                        <span>甲方: {item.clientContactName || '-'}</span>
+                      </div>
+                      <div className="mt-2 max-w-3xl rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-bold leading-5 text-slate-700 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200">
+                        <span className="mr-2 text-[10px] font-black text-slate-400">条款</span>{item.paymentTerms || '未设定条款'}
+                      </div>
+                    </div>
 
-                            <td className="px-6 py-6">
-                                <div className="flex flex-col">
-                                    <span className="font-black text-slate-800 dark:text-slate-200 text-xs">{item.managerName}</span>
-                                    <span className="text-[10px] text-slate-400 font-bold truncate max-w-[120px] mt-0.5">{item.clientContactName}</span>
-                                </div>
-                            </td>
+                    <div className="grid min-w-full grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[540px]">
+                      {[
+                        ['审定价', displayAmount, item.auditedAmount > 0 ? '审定决算价' : '暂定合同价', 'text-slate-900 dark:text-white'],
+                        ['已收', item.receivedAmount || 0, '实际到账', 'text-emerald-600 dark:text-emerald-300'],
+                        ['应收余额', remaining, remaining > 0 ? '待追回' : '已结清', remaining > 0 ? 'text-orange-600 dark:text-orange-300' : 'text-slate-400'],
+                        ['已开票', item.invoicedAmount || 0, '点击预览发票', 'text-primary-600 dark:text-primary-300']
+                      ].map(([label, value, hint, tone]) => {
+                        const isInvoiceMetric = label === '已开票';
+                        const isClickable = isInvoiceMetric && Number(value) > 0;
+                        return (
+                          <button
+                            key={String(label)}
+                            type="button"
+                            disabled={!isClickable}
+                            onClick={() => openInvoicePreview(item)}
+                            className={`rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-left shadow-sm ring-1 ring-white transition-all dark:border-slate-600 dark:bg-slate-900 dark:ring-slate-700/60 ${isClickable ? 'cursor-pointer hover:border-primary-300 hover:bg-primary-50 dark:hover:border-primary-600 dark:hover:bg-primary-950/30' : 'cursor-default'}`}
+                          >
+                            <p className="text-[10px] font-black text-slate-500 dark:text-slate-400">{label}</p>
+                            <p className={`mt-0.5 truncate font-mono text-sm font-black ${tone}`}>{Number(value).toLocaleString()}</p>
+                            <p className="mt-1 text-[9px] font-black text-slate-500 dark:text-slate-400">{hint}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-                            <td className="px-6 py-6 text-right">
-                                <div className="flex flex-col items-end">
-                                    <span className="font-mono font-black text-slate-900 dark:text-white text-sm">{item.auditedAmount > 0 ? item.auditedAmount.toLocaleString() : (item.contractAmount + item.variationAmount).toLocaleString()}</span>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{item.auditedAmount > 0 ? '审定决算价' : '暂定合同价'}</span>
-                                </div>
-                            </td>
-                            
-                            <td className="px-6 py-4 relative group/terms">
-                                <div className="bg-slate-50 dark:bg-slate-700/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 text-[10px] font-black text-slate-500 dark:text-slate-400 truncate max-w-[120px] transition-all cursor-help hover:border-primary-400 group-hover:bg-white dark:group-hover:bg-slate-800">
-                                    {item.paymentTerms || '未设定条款'}
-                                </div>
-                                {item.paymentTerms && (
-                                    <div className="absolute left-1/2 bottom-full mb-3 -translate-x-1/2 w-80 p-6 bg-slate-900 dark:bg-slate-700 text-white rounded-[2rem] shadow-[0_30px_60px_rgba(0,0,0,0.4)] opacity-0 invisible group-hover/terms:opacity-100 group-hover/terms:visible group-hover/terms:translate-y-[-12px] transition-all z-[60] pointer-events-none border border-white/10 backdrop-blur-xl">
-                                        <div className="flex items-center gap-3 mb-4">
-                                            <div className="p-2 bg-primary-600 rounded-xl"><Calculator className="w-4 h-4" /></div>
-                                            <p className="font-black uppercase tracking-[0.2em] text-[10px] text-primary-400">详细支付及结算条款明细</p>
-                                        </div>
-                                        <div className="h-px bg-white/10 mb-4 w-full"></div>
-                                        <p className="leading-relaxed font-bold text-sm text-slate-100 italic">
-                                            "{item.paymentTerms}"
-                                        </p>
-                                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-[12px] border-transparent border-t-slate-900 dark:border-t-slate-700"></div>
-                                    </div>
-                                )}
-                            </td>
-
-                            <td className="px-6 py-6 text-right">
-                                <span className="font-mono text-emerald-600 dark:text-emerald-400 font-black text-sm">{(item.receivedAmount || 0).toLocaleString()}</span>
-                            </td>
-
-                            <td className="px-6 py-6 text-right">
-                                <div className="flex flex-col items-end">
-                                    <span className={`font-mono font-black text-sm ${remaining > 0 ? 'text-orange-600' : 'text-slate-300 dark:text-slate-600'}`}>{remaining.toLocaleString()}</span>
-                                    {remaining > 0 && <span className="text-[8px] font-black text-orange-400 uppercase animate-pulse">待追回</span>}
-                                </div>
-                            </td>
-
-                            <td className="px-6 py-6 text-right">
-                                <span className="font-mono text-primary-600 dark:text-primary-400 font-bold">{(item.invoicedAmount || 0).toLocaleString()}</span>
-                            </td>
-
-                            <td className="px-6 py-6 text-center">
-                                {item.warrantyPeriod ? (
-                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-purple-50 dark:bg-emerald-900/40 text-purple-700 dark:text-emerald-300 border border-purple-100 dark:border-emerald-800 shadow-sm">
-                                        <ShieldCheck className="w-3 h-3 mr-1" /> {item.warrantyPeriod}
-                                    </span>
-                                ) : (
-                                    <span className="text-[10px] text-slate-300 dark:text-slate-600 italic">未约定</span>
-                                )}
-                            </td>
-
-                            <td className="px-6 py-6 text-center">
-                                {item.finalPaymentDueDate ? (
-                                    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-[10px] font-black border-2 transition-all ${
-                                        isOverdue ? 'bg-red-500 text-white border-red-400 shadow-lg shadow-red-500/20' :
-                                        isDueSoon ? 'bg-orange-50 text-orange-700 border-orange-200 animate-pulse' :
-                                        'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-600'
-                                    }`}>
-                                        {item.finalPaymentDueDate}
-                                        {isOverdue && <AlertTriangle className="w-3 h-3" />}
-                                    </div>
-                                ) : <span className="text-slate-200 dark:text-slate-700">-</span>}
-                            </td>
-
-                            {canAdd && (
-                                <td className="px-8 py-6 text-center sticky right-0 bg-white dark:bg-slate-800 group-hover:bg-primary-50 shadow-[-20px_0_30px_-10px_rgba(0,0,0,0.08)] transition-all">
-                                    <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100">
-                                        {canEditItem && (
-                                            <button onClick={() => handleOpenEdit(item)} className="p-3 text-slate-400 hover:text-primary-600 hover:bg-white dark:hover:bg-slate-700 rounded-xl transition-all shadow-md border border-slate-100 dark:border-slate-600 active:scale-90">
-                                                <Edit2 className="w-4 h-4" />
-                                            </button>
-                                        )}
-                                        {canDelete && (
-                                            <button onClick={() => handleRemove(item)} className="p-3 text-slate-300 hover:text-red-500 hover:bg-white dark:hover:bg-slate-700 rounded-xl transition-all shadow-md border border-slate-100 dark:border-slate-600 active:scale-90">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </td>
-                            )}
-                        </tr>
-                      );
-                  })}
-                  {filteredPayments.length === 0 && (
-                      <tr>
-                          <td colSpan={14} className="py-48 text-center text-slate-300 transition-all">
-                              <Calculator className="w-24 h-24 mx-auto mb-6 opacity-5" />
-                              <p className="font-black text-xl uppercase tracking-[0.4em]">暂无财务结算原始记录</p>
-                              <p className="text-[10px] font-bold mt-2 opacity-40">请通过右上角录入功能建立第一笔回款档案</p>
-                          </td>
-                      </tr>
-                  )}
-              </tbody>
-          </table>
-        </div>
+                  <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-200 pt-2.5 dark:border-slate-600 md:grid-cols-[1.2fr_0.8fr_auto] md:items-center">
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between text-[10px] font-black text-slate-400"><span>回款进度</span><span className={progress === 100 ? 'text-emerald-600' : 'text-primary-600'}>{progress}%</span></div>
+                      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700"><div className={`h-full rounded-full transition-all ${progress === 100 ? 'bg-emerald-500' : 'bg-primary-600'}`} style={{ width: `${progress}%` }} /></div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-[10px] font-black">
+                      <span className="rounded-full border border-purple-100 bg-purple-50 px-2.5 py-1 text-purple-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">质保: {item.warrantyPeriod || '未约定'}</span>
+                      <span className={`rounded-full border px-2.5 py-1 ${isOverdue ? 'border-red-400 bg-red-500 text-white' : isDueSoon ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-slate-100 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300'}`}>尾款: {item.finalPaymentDueDate || '-'}</span>
+                    </div>
+                    {canAdd && (
+                      <div className="flex justify-end gap-2">
+                        {canEditItem && <button onClick={() => handleOpenEdit(item)} className="rounded-2xl border border-slate-100 bg-white p-2.5 text-slate-400 shadow-sm transition hover:text-primary-600 dark:border-slate-700 dark:bg-slate-900"><Edit2 className="h-4 w-4" /></button>}
+                        {canDelete && <button onClick={() => handleRemove(item)} className="rounded-2xl border border-slate-100 bg-white p-2.5 text-slate-300 shadow-sm transition hover:text-red-500 dark:border-slate-700 dark:bg-slate-900"><Trash2 className="h-4 w-4" /></button>}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+              })}
+            </div>
+          ))}
+          {filteredPayments.length === 0 && (
+              <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white py-24 text-center text-slate-300 dark:border-slate-700 dark:bg-slate-800">
+                  <Calculator className="mx-auto mb-6 h-20 w-20 opacity-10" />
+                  <p className="text-lg font-black tracking-[0.25em]">暂无财务结算记录</p>
+                  <p className="mt-2 text-xs font-bold opacity-50">请通过右上角录入功能建立第一笔回款档案</p>
+              </div>
+          )}
       </div>
+
+      {invoicePreviewItem && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md">
+          <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl dark:bg-slate-800">
+            <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-700 dark:bg-slate-900">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black tracking-[0.24em] text-primary-600">财务发票预览</p>
+                <h3 className="mt-1 truncate text-lg font-black text-slate-900 dark:text-white">{invoicePreviewItem.title}</h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">{invoicePreviewItem.projectName} · {invoicePreviewItem.fileType}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a href={getArchiveDownloadUrl(invoicePreviewItem.url)} download className="rounded-2xl bg-primary-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-primary-500/20 hover:bg-primary-700">下载发票</a>
+                <button onClick={() => setInvoicePreviewItem(null)} className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-100 p-5 dark:bg-slate-950">
+              {invoicePreviewItem.url && invoicePreviewItem.fileType === 'PDF' ? (
+                <iframe src={invoicePreviewItem.url} title="Invoice Preview" className="h-full w-full rounded-2xl border-0 bg-white shadow-xl" />
+              ) : invoicePreviewItem.url && ['JPG', 'JPEG', 'PNG', 'GIF'].includes(invoicePreviewItem.fileType) ? (
+                <img src={invoicePreviewItem.url} alt={invoicePreviewItem.title} className="mx-auto h-full max-w-full rounded-2xl object-contain shadow-xl" />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white text-center dark:border-slate-700 dark:bg-slate-900">
+                  <FileCheck className="mb-4 h-12 w-12 text-slate-300" />
+                  <p className="text-sm font-black text-slate-700 dark:text-slate-200">该发票格式暂不支持在线预览</p>
+                  <p className="mt-2 text-xs font-bold text-slate-400">请点击右上角下载后查看</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 transition-all">

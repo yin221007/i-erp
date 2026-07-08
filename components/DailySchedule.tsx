@@ -184,7 +184,7 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
 
   return (
     <div className="max-w-7xl mx-auto h-full flex flex-col transition-all">
-      <div className="flex items-center justify-between mb-8 transition-all">
+      <div className="flex items-center justify-between mb-5 transition-all">
         <div>
            {!isRegularUser && <button onClick={() => setSelectedManager(null)} className="text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-primary-600 flex items-center gap-2 mb-3 transition-all"><ArrowLeft className="w-5 h-5" /> 返回人员汇总</button>}
            <h2 className="text-3xl font-black text-slate-900 dark:text-white flex items-center gap-3 transition-colors">{selectedManager} <span className="text-slate-300 font-bold opacity-40">/</span> 日程提醒</h2>
@@ -192,12 +192,12 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
         <button onClick={() => { const y = selectedDate.getFullYear(), m = String(selectedDate.getMonth() + 1).padStart(2, '0'), d = String(selectedDate.getDate()).padStart(2, '0'); setNewItemData({ title: '', date: `${y}-${m}-${d}`, time: '09:00', type: 'Other', projectId: '' }); setIsAddModalOpen(true); }} className="bg-primary-600 text-white px-8 py-4 rounded-2xl hover:bg-primary-700 flex items-center gap-3 text-sm font-black shadow-2xl shadow-primary-500/30 transition-all active:scale-95 uppercase tracking-widest"><Plus className="w-6 h-6" /> 录入新事项</button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 transition-all flex-1">
-          <div className="lg:col-span-2 bg-slate-100 dark:bg-slate-900 p-8 md:p-10 rounded-[2.5rem] shadow-inner flex flex-col transition-all border-2 border-white dark:border-slate-800">
-            <div className="flex justify-between items-center mb-8 transition-all px-4">
+      <div className="grid grid-cols-1 gap-5 transition-all flex-1 items-stretch lg:grid-cols-[410px_minmax(0,1fr)]">
+          <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-3xl shadow-inner flex flex-col transition-all border-2 border-white dark:border-slate-800 lg:sticky lg:top-0">
+            <div className="flex justify-between items-center mb-5 transition-all px-4">
                 <div className="flex items-center gap-4">
                     <div className="bg-primary-600 p-2 rounded-xl shadow-lg"><CalendarIcon className="w-6 h-6 text-white" /></div>
-                    <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter transition-colors">{currentMonth.getFullYear()}年 {currentMonth.getMonth() + 1}月</h3>
+                    <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tighter transition-colors">{currentMonth.getFullYear()}年 {currentMonth.getMonth() + 1}月</h3>
                 </div>
                 <div className="flex space-x-2 transition-all">
                     <button onClick={handlePrevMonth} className="p-3 bg-white dark:bg-slate-800 hover:bg-slate-50 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-400 transition-all shadow-sm"><ChevronLeft className="w-5 h-5" /></button>
@@ -205,10 +205,10 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
                     <button onClick={handleNextMonth} className="p-3 bg-white dark:bg-slate-800 hover:bg-slate-50 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-400 transition-all shadow-sm"><ChevronRight className="w-5 h-5" /></button>
                 </div>
             </div>
-            <div className="grid grid-cols-7 gap-2 mb-4 text-center transition-all px-2">
+            <div className="grid grid-cols-7 gap-1.5 mb-2 text-center transition-all px-1">
                 {weekDaysHeader.map((day, i) => (<div key={i} className={`text-[10px] font-black uppercase py-2 tracking-[0.2em] ${i >= 5 ? 'text-red-500' : 'text-slate-400'}`}>{day}</div>))}
             </div>
-            <div className="grid grid-cols-7 gap-4 flex-1 auto-rows-fr transition-all px-2 pb-2">
+            <div className="grid grid-cols-7 gap-1.5 transition-all px-1 pb-1">
                 {calendarGrid.map((day, idx) => {
                     const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
                     const isToday = isBeijingToday(day);
@@ -232,11 +232,11 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
                         <div 
                             key={idx} 
                             onClick={() => { setSelectedDate(day); if (!isCurrentMonth) setCurrentMonth(day); }} 
-                            className={`relative flex flex-col items-center justify-center p-4 rounded-2xl cursor-pointer transition-all min-h-[90px] border-2 shadow-md hover:translate-y-[-2px]
+                            className={`relative flex min-h-[46px] flex-col items-center justify-center rounded-2xl border-2 p-1.5 cursor-pointer transition-all shadow-sm hover:translate-y-[-1px]
                                 ${!isCurrentMonth ? 'opacity-20 bg-transparent shadow-none border-transparent pointer-events-none' : `${cardBgClass} ${isSelected ? 'border-primary-500 ring-2 ring-primary-500/20 z-10' : 'border-transparent'}`}
                             `}
                         >
-                            <span className={`text-xl font-black transition-colors ${isSpecialFestival && isCurrentMonth && dayEvents.length === 0 ? 'text-red-500' : textClass}`}>
+                            <span className={`text-sm font-black transition-colors ${isSpecialFestival && isCurrentMonth && dayEvents.length === 0 ? 'text-red-500' : textClass}`}>
                                 {day.getDate()}
                             </span>
                             <span className={`text-[9px] truncate max-w-full transition-colors mt-0.5 font-bold ${isSpecialFestival && isCurrentMonth && dayEvents.length === 0 ? 'text-red-500' : (textClass === 'text-white' ? 'opacity-80' : 'text-slate-400')}`}>
@@ -247,12 +247,12 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
                 })}
             </div>
           </div>
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 shadow-xl overflow-hidden flex flex-col transition-all">
-            <div className="p-8 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 transition-all">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col transition-all lg:h-full">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 transition-all">
                 <span className="block text-[10px] text-slate-500 font-black uppercase tracking-widest leading-none mb-1">{formattedSelectedFullDate}</span>
-                <span className="text-xl font-black text-slate-800 dark:text-white">待办提醒</span>
+                <span className="text-lg font-black text-slate-800 dark:text-white">今天 / 本日待办</span>
             </div>
-            <div className="p-6 overflow-y-auto flex-1 transition-all custom-scrollbar bg-slate-50/50 dark:bg-slate-900/30">
+            <div className="p-4 overflow-y-auto flex-1 transition-all custom-scrollbar bg-slate-50/50 dark:bg-slate-900/30">
             {filteredSchedule.filter(item => item.date === getHeaderDate()).length > 0 ? (
                 filteredSchedule.filter(item => item.date === getHeaderDate()).map((item) => (
                 <div key={item.id} className={`flex items-center p-5 rounded-xl mb-4 border-2 transition-all group ${item.isCompleted ? 'opacity-40 grayscale' : 'border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg hover:border-primary-500'}`}>
@@ -267,7 +267,7 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
                         <button onClick={() => onCompleteItem(item.id)} className="p-3 bg-white dark:bg-slate-700 border-2 border-slate-100 dark:border-slate-600 text-slate-300 hover:text-emerald-500 rounded-2xl transition-all shadow-md active:scale-90"><CheckCircle2 className="w-6 h-6" /></button>
                     )}
                 </div>
-            ))) : (<div className="flex flex-col items-center justify-center py-32 text-slate-300 transition-all"><CalendarIcon className="w-20 h-20 mb-6 opacity-10" /><p className="font-black text-sm uppercase tracking-widest">今日暂无日程</p></div>)}
+            ))) : (<div className="flex min-h-[220px] flex-col items-center justify-center py-8 text-slate-300 transition-all"><CalendarIcon className="mb-4 h-14 w-14 opacity-10" /><p className="text-xs font-black uppercase tracking-widest">今日暂无日程</p></div>)}
             </div>
           </div>
       </div>
@@ -275,7 +275,7 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ schedule, projects, users
       {isAddModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 transition-all">
               <div className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[3rem] p-12 shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700">
-                  <div className="flex justify-between items-center mb-10 border-b dark:border-slate-700 pb-8 transition-all"><h3 className="text-2xl font-black text-slate-800 dark:text-white">录入日程提醒</h3><button onClick={() => setIsAddModalOpen(false)} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X className="w-7 h-7 text-slate-500" /></button></div>
+                  <div className="flex justify-between items-center mb-10 border-b dark:border-slate-700 pb-8 transition-all"><h3 className="text-lg font-black text-slate-800 dark:text-white">录入日程提醒</h3><button onClick={() => setIsAddModalOpen(false)} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X className="w-7 h-7 text-slate-500" /></button></div>
                   <div className="space-y-8 transition-all">
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">提醒内容 *</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-6 py-4 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black shadow-inner" value={newItemData.title} onChange={e => setNewItemData({...newItemData, title: e.target.value})} /></div>
                       <div className="grid grid-cols-2 gap-6">

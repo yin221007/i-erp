@@ -86,6 +86,7 @@ test('saving a chat message delivers configured recipient notifications', async 
       password: senderPassword,
       department: '工程部',
       role: 'User',
+      permission: 'ReadWrite',
       avatar: ''
     },
     {
@@ -93,6 +94,7 @@ test('saving a chat message delivers configured recipient notifications', async 
       nickname: 'recipient',
       department: '项目部',
       role: 'User',
+      permission: 'ReadWrite',
       avatar: '',
       preferences: {
         types: { chat: true, approval: true },

@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../auth/middleware.js';
 import {
+  canUpdateResource,
   canWriteResource,
   filterReadableRecords,
   getResourceDefinition,
@@ -19,6 +20,39 @@ function parseJson(value, context) {
   } catch {
     throw new Error(`Invalid JSON data in ${context}`);
   }
+}
+
+
+async function readJsonTable(pool, resource) {
+  const [rows] = await pool.query(
+    `SELECT json_data FROM \`${resource}\` ORDER BY created_at ASC`
+  );
+  return rows.map((row, index) => parseJson(row.json_data, `${resource}/${index}`));
+}
+
+async function loadPolicyContext(pool, resource, record = null) {
+  const context = {};
+  if (['projects', 'clients', 'equipment', 'docs', 'payments', 'production', 'archives', 'schedule', 'channels', 'worklogs'].includes(resource)) {
+    context.users = await readJsonTable(pool, 'users');
+  }
+  if (['projects', 'payments', 'production', 'archives', 'schedule', 'channels'].includes(resource)) {
+    context.projects = resource === 'projects' ? [] : await readJsonTable(pool, 'projects');
+  }
+  if (['messages', 'announcements'].includes(resource)) {
+    if (record?.channelId) {
+      const [rows] = await pool.query(
+        'SELECT json_data FROM channels WHERE id = ? LIMIT 1',
+        [record.channelId]
+      );
+      context.channels = rows.map((row, index) => parseJson(row.json_data, `channels/${record.channelId || index}`));
+    } else {
+      context.channels = await readJsonTable(pool, 'channels');
+    }
+    if (context.channels.some(channel => channel.projectId)) {
+      context.projects = await readJsonTable(pool, 'projects');
+    }
+  }
+  return context;
 }
 
 function requireKnownResource(req, res, next) {
@@ -49,6 +83,10 @@ async function prepareRecord(resource, user, input, routeId) {
     record.creatorId = user.id;
     record.creatorName = user.nickname;
   }
+  if (['clients', 'equipment', 'docs'].includes(resource) && !routeId) {
+    record.creatorId = user.id;
+    record.creatorName = user.nickname;
+  }
   if (resource === 'approvals' && !routeId) {
     record.applicantId = user.id;
     record.applicantName = user.nickname;
@@ -74,13 +112,9 @@ export function createResourceRouter({ pool, onRecordSaved }) {
   router.get('/:resource', async (req, res, next) => {
     const { resource } = req.params;
     try {
-      const [rows] = await pool.query(
-        `SELECT json_data FROM \`${resource}\` ORDER BY created_at ASC`
-      );
-      const records = rows.map((row, index) =>
-        parseJson(row.json_data, `${resource}/${index}`)
-      );
-      const visible = filterReadableRecords(resource, req.authUser, records);
+      const records = await readJsonTable(pool, resource);
+      const policyContext = await loadPolicyContext(pool, resource);
+      const visible = filterReadableRecords(resource, req.authUser, records, policyContext);
       res.json(visible.map(record => sanitizeResourceRecord(resource, record)));
     } catch (error) {
       next(error);
@@ -94,7 +128,8 @@ export function createResourceRouter({ pool, onRecordSaved }) {
       if (!record.id) {
         return res.status(400).json({ error: 'Record id is required' });
       }
-      if (!canWriteResource(resource, req.authUser, record)) {
+      const policyContext = await loadPolicyContext(pool, resource, record);
+      if (!canWriteResource(resource, req.authUser, record, { ...policyContext, action: 'create' })) {
         return res.status(403).json({ error: 'Write access denied' });
       }
 
@@ -147,20 +182,33 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         }
       }
 
-      const record = await prepareRecord(resource, req.authUser, input, id);
-      if (!canWriteResource(resource, req.authUser, record)) {
-        return res.status(403).json({ error: 'Write access denied' });
-      }
-
+      let record = await prepareRecord(resource, req.authUser, input, id);
       let previousRecord = null;
-      if (resource === 'approvals' && onRecordSaved) {
+      if (resource === 'approvals' || ['clients', 'equipment', 'docs'].includes(resource)) {
         const [rows] = await pool.query(
-          'SELECT json_data FROM approvals WHERE id = ? LIMIT 1',
+          `SELECT json_data FROM \`${resource}\` WHERE id = ? LIMIT 1`,
           [id]
         );
-        if (rows.length > 0) {
-          previousRecord = parseJson(rows[0].json_data, `approvals/${id}`);
+        if (resource === 'approvals' && rows.length === 0) {
+          return res.status(404).json({ error: 'Approval not found' });
         }
+        if (rows.length > 0) {
+          previousRecord = parseJson(rows[0].json_data, `${resource}/${id}`);
+          if (['clients', 'equipment', 'docs'].includes(resource)) {
+            record = {
+              ...record,
+              creatorId: previousRecord.creatorId || record.creatorId || req.authUser.id,
+              creatorName: previousRecord.creatorName || record.creatorName || req.authUser.nickname
+            };
+          }
+        } else if (['clients', 'equipment', 'docs'].includes(resource)) {
+          record = { ...record, creatorId: req.authUser.id, creatorName: req.authUser.nickname };
+        }
+      }
+      const policyContext = await loadPolicyContext(pool, resource, record);
+
+      if (!canUpdateResource(resource, req.authUser, record, previousRecord, policyContext)) {
+        return res.status(403).json({ error: 'Write access denied' });
       }
       await pool.query(
         `REPLACE INTO \`${resource}\`
@@ -190,7 +238,8 @@ export function createResourceRouter({ pool, onRecordSaved }) {
       if (rows.length === 0) return res.status(204).end();
 
       const record = parseJson(rows[0].json_data, `${resource}/${id}`);
-      if (!canWriteResource(resource, req.authUser, record)) {
+      const policyContext = await loadPolicyContext(pool, resource, record);
+      if (!canWriteResource(resource, req.authUser, record, { ...policyContext, action: 'delete' })) {
         return res.status(403).json({ error: 'Write access denied' });
       }
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { ArchiveItem, ArchiveCategory, Project, User } from '../types';
-import { Search, FileText, FileCode, FileSpreadsheet, FileImage, Paperclip, FolderOpen, Eye, Download, X, Upload, Save, File as FileIcon, Trash2, ArrowUp, ArrowDown, ArrowUpDown, AlertCircle } from 'lucide-react';
+import { Search, FileText, FileCode, FileSpreadsheet, FileImage, Paperclip, FolderOpen, Eye, Download, X, Upload, Save, File as FileIcon, Trash2, ArrowUp, ArrowDown, ArrowUpDown, AlertCircle, ArrowLeft } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
 import { API_URL, apiFetch } from '../lib/api';
 
@@ -22,6 +22,7 @@ const getDownloadUrl = (url?: string) =>
 const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, projects, onAddArchive, onDeleteArchive, onUpdateArchive, currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState<ArchiveCategory | 'All'>('All');
+  const [activeProjectId, setActiveProjectId] = useState<string>('All');
   const [previewItem, setPreviewItem] = useState<ArchiveItem | null>(null);
 
   const [sortField, setSortField] = useState<SortField>('none');
@@ -66,10 +67,11 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
   const filteredArchives = useMemo(() => {
     return archives.filter(item => 
       (activeCategory === 'All' || item.category === activeCategory) &&
+      (activeProjectId === 'All' || item.projectId === activeProjectId || item.projectName === activeProjectId || item.projectName === projects.find(project => project.id === activeProjectId)?.name) &&
       (item.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
        item.projectName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [archives, activeCategory, searchTerm]);
+  }, [archives, activeCategory, activeProjectId, projects, searchTerm]);
 
   const sortedArchives = useMemo(() => {
     if (sortField === 'none') return filteredArchives;
@@ -84,6 +86,25 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
       return sortDirection === 'asc' ? comparison : -comparison;
     });
   }, [filteredArchives, sortField, sortDirection]);
+
+  const archiveProjectGroups = useMemo(() => {
+    const baseArchives = archives.filter(item =>
+      (activeCategory === 'All' || item.category === activeCategory) &&
+      (item.title.toLowerCase().includes(searchTerm.toLowerCase()) || item.projectName.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+    const groups = new Map<string, { id: string; name: string; count: number; latest: string; categories: Set<ArchiveCategory> }>();
+    baseArchives.forEach(item => {
+      const projectId = item.projectId || projects.find(project => project.name === item.projectName)?.id || item.projectName;
+      const current = groups.get(projectId) || { id: projectId, name: item.projectName || '未关联项目', count: 0, latest: item.uploadDate, categories: new Set<ArchiveCategory>() };
+      current.count += 1;
+      current.latest = new Date(item.uploadDate).getTime() > new Date(current.latest).getTime() ? item.uploadDate : current.latest;
+      current.categories.add(item.category);
+      groups.set(projectId, current);
+    });
+    return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  }, [archives, activeCategory, projects, searchTerm]);
+
+  const selectedProjectLabel = activeProjectId === 'All' ? '' : projects.find(project => project.id === activeProjectId)?.name || activeProjectId;
 
   const handleSort = (field: SortField) => {
     if (sortField === field) setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -176,6 +197,15 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
             </div>
+            <select
+                value={activeProjectId}
+                onChange={(e) => setActiveProjectId(e.target.value)}
+                className="w-full md:w-64 px-4 py-2.5 rounded-2xl border-2 border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all font-black text-xs"
+                title="按工程项目快速筛选"
+            >
+                <option value="All">全部工程项目</option>
+                {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
             <button onClick={handleExportCSV} className="p-3 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-all shadow-sm active:scale-95" title="导出台账数据">
                 <Download className="w-5 h-5" />
             </button>
@@ -210,35 +240,71 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
       </div>
 
       <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] border-2 border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden transition-all">
-        <div className="hidden md:grid grid-cols-12 gap-4 p-6 border-b border-slate-50 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-900/50 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] transition-all">
-            <div className="col-span-5 pl-4">文件主档名称</div>
-            <div className="col-span-3 cursor-pointer hover:text-primary-600 flex items-center transition-colors" onClick={() => handleSort('project')}>关联业务项目 {renderSortIcon('project')}</div>
-            <div className="col-span-2 cursor-pointer hover:text-primary-600 flex items-center transition-colors" onClick={() => handleSort('category')}>资料类别 {renderSortIcon('category')}</div>
-            <div className="col-span-2 text-center">快捷管理</div>
-        </div>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700 transition-all">
-            {sortedArchives.map(item => (
-                <div key={item.id} className="flex flex-col md:grid md:grid-cols-12 gap-4 p-6 items-center hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-all group">
-                    <div className="col-span-12 md:col-span-5 flex items-center gap-4 w-full pl-2">
-                        <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-2xl border border-slate-100 dark:border-slate-600 shadow-sm transition-transform group-hover:scale-110">{getFileIcon(item.fileType)}</div>
-                        <div className="min-w-0 flex-1">
-                            <h4 className="text-sm font-black text-slate-800 dark:text-white truncate group-hover:text-primary-600 transition-colors">{item.title}</h4>
-                            <p className="md:hidden text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tighter truncate">{item.projectName}</p>
+        {activeProjectId === 'All' ? (
+          <div className="p-5">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">按工程项目归档</h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">先选择工程，再查看该工程下的合同、图纸、发票、验收等资料。</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black text-slate-500 dark:bg-slate-900">{archiveProjectGroups.length} 个工程</span>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {archiveProjectGroups.map(group => (
+                <button key={group.id} onClick={() => setActiveProjectId(group.id)} className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-left transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:bg-primary-50 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:hover:border-primary-600">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="mb-3 inline-flex rounded-2xl bg-white p-3 text-primary-600 shadow-sm dark:bg-slate-800"><FolderOpen className="h-5 w-5" /></div>
+                      <h4 className="truncate text-sm font-black text-slate-900 dark:text-white">{group.name}</h4>
+                      <p className="mt-2 text-xs font-bold text-slate-500">{group.count} 份资料 · {group.categories.size} 类 · 最近 {group.latest.split('T')[0]}</p>
+                    </div>
+                    <ArrowUp className="h-4 w-4 rotate-45 text-slate-300" />
+                  </div>
+                </button>
+              ))}
+            </div>
+            {archiveProjectGroups.length === 0 && <div className="p-24 text-center text-slate-300 transition-all"><FolderOpen className="w-20 h-20 mx-auto mb-5 opacity-20" /><p className="font-black text-sm tracking-widest">未检索到匹配的工程档案</p></div>}
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/70 p-5 dark:border-slate-700 dark:bg-slate-900/50 md:flex-row md:items-center md:justify-between">
+              <div>
+                <button onClick={() => setActiveProjectId('All')} className="mb-2 inline-flex items-center gap-2 text-xs font-black text-slate-500 hover:text-primary-600"><ArrowLeft className="h-4 w-4" /> 返回项目文件夹</button>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">{selectedProjectLabel}</h3>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-slate-500 shadow-sm dark:bg-slate-800">{sortedArchives.length} 份资料</span>
+            </div>
+            <div className="hidden md:grid grid-cols-12 gap-4 p-6 border-b border-slate-50 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-900/50 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] transition-all">
+                <div className="col-span-5 pl-4">文件主档名称</div>
+                <div className="col-span-3 cursor-pointer hover:text-primary-600 flex items-center transition-colors" onClick={() => handleSort('project')}>关联业务项目 {renderSortIcon('project')}</div>
+                <div className="col-span-2 cursor-pointer hover:text-primary-600 flex items-center transition-colors" onClick={() => handleSort('category')}>资料类别 {renderSortIcon('category')}</div>
+                <div className="col-span-2 text-center">快捷管理</div>
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-slate-700 transition-all">
+                {sortedArchives.map(item => (
+                    <div key={item.id} className="flex flex-col md:grid md:grid-cols-12 gap-4 p-6 items-center hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-all group">
+                        <div className="col-span-12 md:col-span-5 flex items-center gap-4 w-full pl-2">
+                            <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-2xl border border-slate-100 dark:border-slate-600 shadow-sm transition-transform group-hover:scale-110">{getFileIcon(item.fileType)}</div>
+                            <div className="min-w-0 flex-1">
+                                <h4 className="text-sm font-black text-slate-800 dark:text-white truncate group-hover:text-primary-600 transition-colors">{item.title}</h4>
+                                <p className="md:hidden text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tighter truncate">{item.projectName}</p>
+                            </div>
+                        </div>
+                        <div className="hidden md:block col-span-3 text-xs font-bold text-slate-500 dark:text-slate-400 truncate px-2 transition-colors">{item.projectName}</div>
+                        <div className="col-span-12 md:col-span-2 flex items-center px-2">
+                            <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border transition-all ${getCategoryBadgeStyle(item.category)}`}>{getCategoryLabel(item.category)}</span>
+                        </div>
+                        <div className="col-span-12 md:col-span-2 flex items-center justify-end md:justify-center gap-2 w-full transition-all">
+                            <button onClick={() => setPreviewItem(item)} className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Eye className="w-5 h-5" /></button>
+                            <a href={getDownloadUrl(item.url)} download className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Download className="w-5 h-5" /></a>
+                            {(currentUser.role === 'Admin' || item.uploader === currentUser.nickname) && <button onClick={(e) => { e.stopPropagation(); onDeleteArchive(item.id); }} className="p-2 text-slate-100 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"><Trash2 className="w-5 h-5" /></button>}
                         </div>
                     </div>
-                    <div className="hidden md:block col-span-3 text-xs font-bold text-slate-500 dark:text-slate-400 truncate px-2 transition-colors">{item.projectName}</div>
-                    <div className="col-span-12 md:col-span-2 flex items-center px-2">
-                        <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border transition-all ${getCategoryBadgeStyle(item.category)}`}>{getCategoryLabel(item.category)}</span>
-                    </div>
-                    <div className="col-span-12 md:col-span-2 flex items-center justify-end md:justify-center gap-2 w-full transition-all">
-                        <button onClick={() => setPreviewItem(item)} className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Eye className="w-5 h-5" /></button>
-                        <a href={getDownloadUrl(item.url)} download className="p-2 text-slate-300 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all active:scale-90"><Download className="w-5 h-5" /></a>
-                        {(currentUser.role === 'Admin' || item.uploader === currentUser.nickname) && <button onClick={(e) => { e.stopPropagation(); onDeleteArchive(item.id); }} className="p-2 text-slate-100 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"><Trash2 className="w-5 h-5" /></button>}
-                    </div>
-                </div>
-            ))}
-        </div>
-        {sortedArchives.length === 0 && <div className="p-40 text-center text-slate-200 transition-all"><FolderOpen className="w-24 h-24 mx-auto mb-6 opacity-5" /><p className="font-black text-lg uppercase tracking-widest">未检索到匹配的工程档案</p></div>}
+                ))}
+            </div>
+            {sortedArchives.length === 0 && <div className="p-40 text-center text-slate-200 transition-all"><FolderOpen className="w-24 h-24 mx-auto mb-6 opacity-5" /><p className="font-black text-lg uppercase tracking-widest">该工程暂无匹配资料</p></div>}
+          </>
+        )}
       </div>
 
       {isUploadModalOpen && (

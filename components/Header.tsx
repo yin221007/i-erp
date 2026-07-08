@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Layout, Bell, Menu, ChevronDown, LogOut, User as UserIcon, Sun, Moon, Clock, Settings, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, CloudSun, Wind, Droplets } from 'lucide-react';
+import { Bell, Menu, ChevronDown, LogOut, User as UserIcon, Sun, Moon, Clock, Settings, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, CloudSun, Wind, Droplets } from 'lucide-react';
 import { User, AppSettings, Notification, UserPreferences } from '../types';
 import { CHINA_CITIES } from '../constants';
 import NotificationCenter from './NotificationCenter';
@@ -146,10 +146,8 @@ const Header: React.FC<HeaderProps> = ({ onMenuToggle, currentUser, allUsers, on
     <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 h-16 flex items-center justify-between px-3 md:px-6 sticky top-0 z-30 transition-colors duration-300">
       <div className="flex items-center space-x-2 md:space-x-3 min-w-0 flex-1 md:flex-none">
         <button onClick={onMenuToggle} className="md:hidden p-2 -ml-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-400"><Menu className="w-6 h-6" /></button>
-        {settings?.logoUrl ? (<img src={settings.logoUrl} alt="Logo" style={{ height: '28px', maxWidth: '80px', objectFit: 'contain' }} />) : (<div className="bg-primary-600 p-1.5 rounded-lg flex-shrink-0"><Layout className="w-5 h-5 text-white" /></div>)}
         <div className="flex items-center gap-1.5 overflow-hidden">
-          <h1 className="text-sm md:text-xl font-bold text-slate-800 dark:text-white tracking-tight truncate shrink-0">{settings?.appName || 'i ERP'}</h1>
-          {settings?.poweredByText && (<div className="hidden sm:flex items-center gap-2 shrink-0"><div className="h-3.5 w-px bg-slate-200 dark:bg-slate-700" /><span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium italic tracking-wide truncate opacity-80 leading-none">{settings.poweredByText}</span></div>)}
+          {settings?.poweredByText && (<span className="hidden sm:block text-[10px] text-slate-400 dark:text-slate-500 font-medium italic tracking-wide truncate opacity-80 leading-none">{settings.poweredByText}</span>)}
         </div>
       </div>
       

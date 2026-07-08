@@ -95,6 +95,29 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
     })
   , [visibleApprovals, currentUser.id]);
 
+  const getPendingApproverIds = (approval: Approval) => {
+    if (approval.status !== 'Pending') return [];
+    const outcomes = approval.versions?.[0]?.outcomes || [];
+    const signedIds = outcomes.map(o => o.approverId);
+    if (approval.strategy === 'SEQUENTIAL') {
+      const nextId = approval.approverIds.find(id => !signedIds.includes(id));
+      return nextId ? [nextId] : [];
+    }
+    return approval.approverIds.filter(id => !signedIds.includes(id));
+  };
+
+  const getPendingApproverNames = (approval: Approval) => {
+    const ids = getPendingApproverIds(approval);
+    if (ids.length === 0) return approval.status === 'Pending' ? '待系统更新' : '-';
+    return users.filter(user => ids.includes(user.id)).map(user => user.nickname).join('、') || ids.join('、');
+  };
+
+  const getStayDays = (approval: Approval) => {
+    const updated = new Date(approval.updatedAt || approval.createdAt);
+    if (Number.isNaN(updated.getTime())) return 0;
+    return Math.max(0, Math.floor((Date.now() - updated.getTime()) / 86400000));
+  };
+
   const displayedList = useMemo(() => {
     let list: Approval[] = [];
     if (activeTab === 'my_requests') list = myRequests;
@@ -126,7 +149,14 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
     if (!formTitle || selectedApproverIds.length === 0) return alert("标题及审批人必填");
     const now = new Date().toISOString();
     const data: Partial<Approval> = { title: formTitle, type: formType, currentContent: formContent, currentAttachments: formAttachments, strategy: formStrategy, approverIds: selectedApproverIds, approverNamesDisplay: users.filter(u => selectedApproverIds.includes(u.id)).map(u=>u.nickname).join(', '), status: asDraft ? 'Draft' : 'Pending', updatedAt: now };
-    if (editingApproval) onUpdateApproval({ ...editingApproval, ...data } as Approval);
+    if (editingApproval) {
+      const shouldCreateFreshVersion = !asDraft && (editingApproval.status === 'Returned' || editingApproval.status === 'Draft');
+      const nextVersionNo = Math.max(0, ...(editingApproval.versions || []).map(v => v.version || 0)) + 1;
+      const versions = shouldCreateFreshVersion
+        ? [{ version: nextVersionNo, content: formContent, attachments: formAttachments, submittedAt: now, outcomes: [] }, ...(editingApproval.versions || [])]
+        : editingApproval.versions;
+      onUpdateApproval({ ...editingApproval, ...data, versions } as Approval);
+    }
     else onAddApproval({ ...data, id: Math.random().toString(36).substr(2, 9), applicantId: currentUser.id, applicantName: currentUser.nickname, department: currentUser.department, versions: [{ version: 1, content: formContent, attachments: formAttachments, submittedAt: now, outcomes: [] }], createdAt: now } as Approval);
     setIsModalOpen(false);
   };
@@ -179,7 +209,7 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
            <div className="p-3 bg-primary-600 rounded-2xl shadow-xl shadow-primary-500/20"><UserCheck className="w-8 h-8 text-white" /></div>
            <div>
               <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">业务审批中心</h2>
-              <div className="flex items-center gap-2 mt-1 text-slate-400 text-sm font-medium">高效流转工程管理环节</div>
+              <div className="flex items-center gap-2 mt-1 text-slate-400 text-sm font-medium">顺序按人逐级流转；并行/会签需全员同意；或签任一人同意即通过</div>
            </div>
         </div>
         <button onClick={handleOpenCreate} className="bg-primary-600 text-white px-6 py-3 rounded-2xl hover:bg-primary-700 flex items-center gap-2 shadow-xl shadow-primary-500/30 active:scale-95 font-black uppercase text-xs tracking-widest"><Plus className="w-4 h-4" /> 发起新申请</button>
@@ -224,6 +254,9 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
                         <div className="col-span-9 md:col-span-5">
                             <h4 className="text-sm font-black text-slate-800 dark:text-white truncate group-hover:text-primary-600 transition-colors">{app.title}</h4>
                             <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">{app.type === 'Procurement' ? '采购' : app.type === 'Engineering' ? '工程' : '业务'}</p>
+                            {app.status === 'Pending' && (
+                              <p className="mt-2 text-[10px] font-black text-primary-600 dark:text-primary-300">当前: {getPendingApproverNames(app)} · 已停留 {getStayDays(app)} 天 · {getStrategyInfo(app.strategy).label}</p>
+                            )}
                         </div>
                         <div className="col-span-6 md:col-span-2">
                             <p className="text-xs font-black text-slate-700 dark:text-slate-300">{app.applicantName}</p>
@@ -273,7 +306,7 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
 
                     <div className="grid grid-cols-2 gap-6">
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">申请类别</label><select disabled={viewMode === 'view' || viewMode === 'audit'} className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-slate-50 dark:bg-slate-900 font-black text-sm outline-none focus:border-primary-500 transition-all" value={formType} onChange={e => setFormType(e.target.value as any)}><option value="Procurement">设备采购</option><option value="Expense">费用报销</option><option value="Leave">人事请假</option><option value="Engineering">工程现场变更</option><option value="Other">其他通用申请</option></select></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">审批策略</label><select disabled={viewMode === 'view' || viewMode === 'audit'} className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-slate-50 dark:bg-slate-900 font-black text-sm outline-none focus:border-primary-500 transition-all" value={formStrategy} onChange={e => setFormStrategy(e.target.value as any)}><option value="SEQUENTIAL">顺序审批 (层级递进)</option><option value="PARALLEL">并行审批 (全员独立)</option><option value="JOINT">会签审批 (全员同意)</option><option value="OR_SIGN">或签审批 (任一同意)</option></select></div>
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">审批策略</label><select disabled={viewMode === 'view' || viewMode === 'audit'} className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-slate-50 dark:bg-slate-900 font-black text-sm outline-none focus:border-primary-500 transition-all" value={formStrategy} onChange={e => setFormStrategy(e.target.value as any)}><option value="SEQUENTIAL">顺序审批 (层级递进)</option><option value="PARALLEL">并行审批 (同时通知，全员同意)</option><option value="JOINT">会签审批 (全员签署同意)</option><option value="OR_SIGN">或签审批 (任一同意)</option></select></div>
                     </div>
                     <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">事项简述 *</label><input disabled={viewMode === 'view' || viewMode === 'audit'} className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-6 py-4 bg-slate-50 dark:bg-slate-900 font-black text-sm outline-none focus:border-primary-500 transition-all shadow-inner" value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder="简单概括业务核心意向" /></div>
                     <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">详情正文</label><textarea disabled={viewMode === 'view' || viewMode === 'audit'} className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-6 h-40 bg-slate-50 dark:bg-slate-900 font-medium text-sm outline-none focus:border-primary-500 transition-all shadow-inner resize-none leading-relaxed" value={formContent} onChange={e => setFormContent(e.target.value)} placeholder="详细说明申请缘由、预算或现场情况描述" /></div>
