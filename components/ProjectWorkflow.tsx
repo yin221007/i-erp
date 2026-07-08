@@ -17,9 +17,10 @@ interface ProjectWorkflowProps {
   archives?: ArchiveItem[];
   currentUser: User;
   users?: User[]; 
+  backLabel?: string;
 }
 
-const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpdateNode, onUpdateProject, onBack, onAddArchive, onDeleteArchive, archives, currentUser, users = [] }) => {
+const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpdateNode, onUpdateProject, onBack, onAddArchive, onDeleteArchive, archives, currentUser, users = [], backLabel = '返回项目台账' }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<'All' | 'Key' | 'Pending' | 'Mine'>('All');
   const [taskSearch, setTaskSearch] = useState('');
@@ -105,7 +106,7 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4">
         <div className="w-full">
           <button onClick={onBack} className="mb-3 flex items-center text-xs md:text-sm text-slate-600 dark:text-slate-400 hover:text-primary-600 transition-all font-black group">
-            <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" /> 返回项目台账
+            <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" /> {backLabel}
           </button>
           <div className="flex items-center space-x-2 text-[10px] md:text-sm text-slate-500 mb-1 md:mb-2 font-bold">
             <span className="uppercase tracking-widest">ORDER</span>

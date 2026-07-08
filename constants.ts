@@ -32,7 +32,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   appName: 'i ERP',
   logoUrl: '', 
   logoWidth: 40,
-  poweredByText: 'Powered by i ERP'
+  poweredByText: 'Powered by Yin'
 };
 
 export const INITIAL_USER_PREFS: UserPreferences = {
@@ -316,31 +316,31 @@ export const INITIAL_WORKFLOW: WorkflowNode[] = [
 
 export const INITIAL_PROJECTS: Project[] = [
   {
-    id: 'demo-project-1',
-    name: '示例商业厨房工程',
-    code: 'DEMO-2026-001',
-    clientName: '示例餐饮管理公司',
-    manager: '演示经理',
-    startDate: '2026-01-01',
-    deadline: '2026-03-31',
+    id: 'p-1',
+    name: '滨江万象城 2期 厨房工程',
+    code: 'PJ-2023-088',
+    clientName: '滨江万象城餐饮管理有限公司',
+    manager: '李明',
+    startDate: '2023-11-01',
+    deadline: '2024-02-15',
     status: 'Active',
     progress: 15,
-    nodes: JSON.parse(JSON.stringify(INITIAL_WORKFLOW)),
-    keyRisks: '演示风险：现场条件待复核',
-    currentPhaseDeadline: '2026-02-15',
+    nodes: JSON.parse(JSON.stringify(INITIAL_WORKFLOW)), 
+    keyRisks: '排油烟管道：需提前确认土建预留孔',
+    currentPhaseDeadline: '2024-01-15',
     createdAt: new Date().toISOString()
   }
 ];
 
 export const INITIAL_USERS: User[] = [
-  {
-    id: 'demo-admin',
-    nickname: 'admin',
-    password: 'ChangeMe-Admin-123!',
-    department: '系统管理',
-    role: 'Admin',
+  { 
+    id: 'u-1', 
+    nickname: 'admin', 
+    password: 'password',
+    department: '总经办', 
+    role: 'Admin', 
     isDefaultAdmin: true,
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin'
+    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
   }
 ];
 

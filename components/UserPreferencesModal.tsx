@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserPreferences, ThemeColor, NotificationWebhooks } from '../types';
-import { X, Bell, Save, Volume2, Palette, Clock, MapPin, Settings, CheckCircle2, Globe, MessageSquare, ClipboardList, Calendar, BellRing, Smartphone, ChevronDown, ShieldCheck, Send, MessageCircle, RotateCcw, Activity } from 'lucide-react';
+import { X, Bell, Save, Volume2, Palette, Clock, MapPin, Settings, CheckCircle2, Globe, MessageSquare, ClipboardList, Calendar, BellRing, ChevronDown, ShieldCheck, Send, MessageCircle, RotateCcw, Activity, Sun, Moon, Users } from 'lucide-react';
 import { CHINA_CITIES_DATA } from '../constants';
 import { API_URL, apiFetch } from '../lib/api';
 
@@ -10,19 +10,27 @@ interface UserPreferencesModalProps {
   onClose: () => void;
   preferences: UserPreferences;
   onSave: (prefs: UserPreferences) => void;
+  theme: 'light' | 'dark';
+  onThemeChange: (theme: 'light' | 'dark') => void;
 }
 
-const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onClose, preferences, onSave }) => {
+const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onClose, preferences, onSave, theme, onThemeChange }) => {
   const [localPrefs, setLocalPrefs] = useState<UserPreferences>(preferences);
+  const [localTheme, setLocalTheme] = useState<'light' | 'dark'>(theme);
+  const initialThemeRef = useRef<'light' | 'dark'>(theme);
+  const savedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<'push' | 'integration' | 'format' | 'theme' | 'weather'>('push');
   const [isTesting, setIsTesting] = useState<string | null>(null);
-  
+
   // 城市选择状态
   const [selectedProvince, setSelectedProvince] = useState('');
 
   useEffect(() => {
       if (isOpen) {
+          savedRef.current = false;
+          initialThemeRef.current = theme;
           setLocalPrefs(preferences);
+          setLocalTheme(theme);
           // 初始化已选省份
           if (preferences.weatherLocation.city) {
               for (const [prov, cities] of Object.entries(CHINA_CITIES_DATA)) {
@@ -33,11 +41,35 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
               }
           }
       }
-  }, [isOpen, preferences]);
+  }, [isOpen, preferences, theme]);
+
+  useEffect(() => {
+      if (!isOpen) return;
+      document.body.setAttribute('data-theme', localPrefs.themeColor || 'blue');
+      const baseSizeMap = { small: '14px', medium: '16px', large: '18px', xlarge: '20px' } as const;
+      document.documentElement.style.fontSize = baseSizeMap[localPrefs.fontSize] || '16px';
+  }, [isOpen, localPrefs.themeColor, localPrefs.fontSize]);
+
+  useEffect(() => {
+      if (isOpen) onThemeChange(localTheme);
+  }, [isOpen, localTheme, onThemeChange]);
 
   if (!isOpen) return null;
 
+  const restorePreview = () => {
+    document.body.setAttribute('data-theme', preferences.themeColor || 'blue');
+    const baseSizeMap = { small: '14px', medium: '16px', large: '18px', xlarge: '20px' } as const;
+    document.documentElement.style.fontSize = baseSizeMap[preferences.fontSize] || '16px';
+    onThemeChange(initialThemeRef.current);
+  };
+
+  const handleCancel = () => {
+    if (!savedRef.current) restorePreview();
+    onClose();
+  };
+
   const handleSave = () => {
+    savedRef.current = true;
     onSave(localPrefs);
     onClose();
   };
@@ -111,16 +143,16 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm transition-all p-4 md:p-6 overflow-hidden">
       <div className="bg-white dark:bg-slate-800 w-full max-w-xl rounded-[2.5rem] p-6 md:p-8 shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[95vh] transition-all relative border border-white/20">
-        
+
         {/* Header Section */}
         <div className="flex justify-between items-center mb-6 border-b dark:border-slate-700 pb-5 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-xl">
-              <Settings className="w-6 h-6 text-primary-600" /> 
+              <Settings className="w-6 h-6 text-primary-600" />
             </div>
             <h3 className="text-xl md:text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">账户偏好设置</h3>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-500 shrink-0 transition-colors">
+          <button onClick={handleCancel} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-500 shrink-0 transition-colors">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -134,16 +166,16 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                 { id: 'theme', label: '外观主题', icon: Palette },
                 { id: 'weather', label: '气象定位', icon: MapPin },
             ].map(tab => (
-                <button 
-                  key={tab.id} 
-                  onClick={() => setActiveTab(tab.id as any)} 
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
                   className={`flex-1 min-w-[70px] flex flex-col items-center gap-1.5 py-4 px-2 rounded-[1.2rem] transition-all group ${
-                    activeTab === tab.id 
-                    ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xl transform scale-105 border border-slate-100 dark:border-slate-600' 
+                    activeTab === tab.id
+                    ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-xl transform scale-105 border border-slate-100 dark:border-slate-600'
                     : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
                   }`}
                 >
-                  <tab.icon className={`w-4.5 h-4.5 transition-transform group-hover:scale-110 ${activeTab === tab.id ? 'text-emerald-500' : 'text-slate-400'}`} />
+                  <tab.icon className={`w-4.5 h-4.5 transition-transform group-hover:scale-110 ${activeTab === tab.id ? 'text-primary-500' : 'text-slate-400'}`} />
                   <span className={`text-[9px] font-black uppercase tracking-widest ${activeTab === tab.id ? 'opacity-100' : 'opacity-60'}`}>{tab.label}</span>
                 </button>
             ))}
@@ -151,12 +183,12 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
 
         <div className="flex-1 overflow-y-auto min-h-0 pr-2 custom-scrollbar">
             <div className="space-y-10 pb-10">
-                
+
                 {/* 1. 通知页签 */}
                 {activeTab === 'push' && (
                     <div className="space-y-8 animate-in fade-in transition-all">
                         <div className="bg-slate-50/80 dark:bg-slate-900/40 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-sm transition-all space-y-8">
-                            
+
                             {/* 桌面实时推送设置 */}
                             <div className="flex items-center justify-between">
                                 <div className="space-y-1">
@@ -165,7 +197,7 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                   <input type="checkbox" className="sr-only peer" checked={localPrefs.enableBrowser} onChange={e => setLocalPrefs(p => ({...p, enableBrowser: e.target.checked}))} />
-                                  <div className="w-14 h-8 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-500 transition-all shadow-inner"></div>
+                                  <div className="w-14 h-8 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary-500 transition-all shadow-inner"></div>
                                 </label>
                             </div>
 
@@ -181,14 +213,14 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                   <input type="checkbox" className="sr-only peer" checked={localPrefs.sound} onChange={e => setLocalPrefs(p => ({...p, sound: e.target.checked}))} />
-                                  <div className="w-14 h-8 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-500 transition-all shadow-inner"></div>
+                                  <div className="w-14 h-8 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary-500 transition-all shadow-inner"></div>
                                 </label>
                             </div>
                         </div>
 
                         <div className="space-y-5">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-1">通知订阅类型</h4>
-                            
+
                             <div className="space-y-3">
                                 {[
                                     { key: 'chat', label: '团队即时通讯 (含群组置顶公告)', icon: MessageSquare },
@@ -203,11 +235,11 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                             </div>
                                             <span className="text-sm font-bold text-slate-700 dark:text-slate-200">{item.label}</span>
                                         </div>
-                                        <input 
-                                            type="checkbox" 
-                                            checked={localPrefs.types[item.key as keyof typeof localPrefs.types]} 
+                                        <input
+                                            type="checkbox"
+                                            checked={localPrefs.types[item.key as keyof typeof localPrefs.types]}
                                             onChange={e => updateNotificationType(item.key as any, e.target.checked)}
-                                            className="w-6 h-6 rounded-lg text-primary-600 border-slate-300 focus:ring-emerald-500 transition-all cursor-pointer shadow-sm"
+                                            className="w-6 h-6 rounded-lg text-primary-600 border-slate-300 focus:ring-primary-500 transition-all cursor-pointer shadow-sm"
                                         />
                                     </div>
                                 ))}
@@ -219,11 +251,25 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                 {/* 2. 推送集成页签 - 增加测试按钮 */}
                 {activeTab === 'integration' && (
                     <div className="space-y-6 animate-in slide-in-from-right-2">
-                        <div className="bg-emerald-50 dark:bg-emerald-900/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800 flex gap-4 mb-2 shadow-sm">
-                            <ShieldCheck className="w-6 h-6 text-emerald-600 flex-shrink-0" />
-                            <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 leading-relaxed uppercase tracking-tight">
+                        <div className="bg-primary-50 dark:bg-primary-900/20 p-5 rounded-2xl border border-primary-100 dark:border-primary-800 flex gap-4 mb-2 shadow-sm">
+                            <ShieldCheck className="w-6 h-6 text-primary-600 flex-shrink-0" />
+                            <p className="text-[10px] font-bold text-primary-700 dark:text-primary-300 leading-relaxed uppercase tracking-tight">
                                 请绑定您的个人推送通道。当有需要您处理的审批流转到您的节点时，系统将通过这些通道向您发送即时提醒。
                             </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {[
+                                { title: '个人必达', desc: '审批、聊天点名、个人待办用 PushPlus，最适合一对一提醒。', icon: MessageCircle, tone: 'text-primary-600 bg-primary-50 border-primary-100' },
+                                { title: '团队同步', desc: '项目群、部门公告建议用企业微信群机器人，方便多人同时看见。', icon: Users, tone: 'text-blue-600 bg-blue-50 border-blue-100' },
+                                { title: '备用通道', desc: '钉钉适合外部协作或备用告警，建议只接系统级通知。', icon: ShieldCheck, tone: 'text-cyan-600 bg-cyan-50 border-cyan-100' }
+                            ].map(item => (
+                                <div key={item.title} className={`p-4 rounded-2xl border ${item.tone} dark:bg-slate-900/40 dark:border-slate-700`}>
+                                    <item.icon className="w-5 h-5 mb-3" />
+                                    <p className="text-xs font-black text-slate-800 dark:text-white">{item.title}</p>
+                                    <p className="mt-2 text-[10px] font-bold leading-relaxed text-slate-500 dark:text-slate-400">{item.desc}</p>
+                                </div>
+                            ))}
                         </div>
 
                         <div className="space-y-6">
@@ -231,13 +277,13 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                             <div className="bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-[2rem] p-8 space-y-6 shadow-sm">
                                 <div className="flex items-center justify-between border-b dark:border-slate-800 pb-4">
                                     <div className="flex items-center gap-3">
-                                        <MessageCircle className="w-6 h-6 text-emerald-500" />
+                                        <MessageCircle className="w-6 h-6 text-primary-500" />
                                         <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">PUSHPLUS 通道</h4>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={() => handleTestPush('PushPlus')}
                                         disabled={isTesting !== null}
-                                        className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-lg text-[9px] font-black uppercase text-emerald-600 flex items-center gap-1.5 active:scale-95 transition-all"
+                                        className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-lg text-[9px] font-black uppercase text-primary-600 flex items-center gap-1.5 active:scale-95 transition-all"
                                     >
                                         {isTesting === 'PushPlus' ? <RotateCcw className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
                                         测试连接
@@ -245,12 +291,12 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 </div>
                                 <div>
                                     <label className="block text-[9px] font-black text-slate-400 uppercase mb-3 tracking-widest ml-1">个人专用推送 TOKEN</label>
-                                    <input 
-                                        className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-emerald-500 font-mono text-xs dark:text-white shadow-inner transition-all" 
-                                        type="password" 
-                                        value={localPrefs.webhooks?.pushPlusToken || ''} 
-                                        onChange={e => updateWebhooks('pushPlusToken', e.target.value)} 
-                                        placeholder="在此粘贴您的 pushplus token..." 
+                                    <input
+                                        className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-primary-500 font-mono text-xs dark:text-white shadow-inner transition-all"
+                                        type="password"
+                                        value={localPrefs.webhooks?.pushPlusToken || ''}
+                                        onChange={e => updateWebhooks('pushPlusToken', e.target.value)}
+                                        placeholder="在此粘贴您的 pushplus token..."
                                     />
                                 </div>
                             </div>
@@ -262,7 +308,7 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                         <Send className="w-6 h-6 text-blue-500" />
                                         <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">企业微信群机器人</h4>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={() => handleTestPush('WeCom')}
                                         disabled={isTesting !== null}
                                         className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-lg text-[9px] font-black uppercase text-blue-600 flex items-center gap-1.5 active:scale-95 transition-all"
@@ -273,11 +319,11 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 </div>
                                 <div>
                                     <label className="block text-[9px] font-black text-slate-400 uppercase mb-3 tracking-widest ml-1">WEBHOOK URL</label>
-                                    <input 
-                                        className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-blue-500 font-mono text-xs dark:text-white shadow-inner transition-all" 
-                                        value={localPrefs.webhooks?.wecomWebhook || ''} 
-                                        onChange={e => updateWebhooks('wecomWebhook', e.target.value)} 
-                                        placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." 
+                                    <input
+                                        className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-blue-500 font-mono text-xs dark:text-white shadow-inner transition-all"
+                                        value={localPrefs.webhooks?.wecomWebhook || ''}
+                                        onChange={e => updateWebhooks('wecomWebhook', e.target.value)}
+                                        placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
                                     />
                                 </div>
                             </div>
@@ -289,7 +335,7 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                         <ShieldCheck className="w-6 h-6 text-cyan-500" />
                                         <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">钉钉自定义机器人</h4>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={() => handleTestPush('DingTalk')}
                                         disabled={isTesting !== null}
                                         className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-lg text-[9px] font-black uppercase text-cyan-600 flex items-center gap-1.5 active:scale-95 transition-all"
@@ -301,21 +347,21 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 <div className="space-y-6">
                                     <div>
                                         <label className="block text-[9px] font-black text-slate-400 uppercase mb-3 tracking-widest ml-1">WEBHOOK URL (含 TOKEN)</label>
-                                        <input 
-                                            className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-cyan-500 font-mono text-xs dark:text-white shadow-inner transition-all" 
-                                            value={localPrefs.webhooks?.dingtalkWebhook || ''} 
-                                            onChange={e => updateWebhooks('dingtalkWebhook', e.target.value)} 
-                                            placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." 
+                                        <input
+                                            className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-cyan-500 font-mono text-xs dark:text-white shadow-inner transition-all"
+                                            value={localPrefs.webhooks?.dingtalkWebhook || ''}
+                                            onChange={e => updateWebhooks('dingtalkWebhook', e.target.value)}
+                                            placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-[9px] font-black text-slate-400 uppercase mb-3 tracking-widest ml-1">安全密钥 (SECRET)</label>
-                                        <input 
-                                            className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-cyan-500 font-mono text-xs dark:text-white shadow-inner transition-all" 
+                                        <input
+                                            className="w-full border-2 border-slate-100 dark:border-slate-800 dark:bg-slate-950 rounded-xl px-5 py-4 outline-none focus:border-cyan-500 font-mono text-xs dark:text-white shadow-inner transition-all"
                                             type="password"
-                                            value={localPrefs.webhooks?.dingtalkSecret || ''} 
-                                            onChange={e => updateWebhooks('dingtalkSecret', e.target.value)} 
-                                            placeholder="SEC..." 
+                                            value={localPrefs.webhooks?.dingtalkSecret || ''}
+                                            onChange={e => updateWebhooks('dingtalkSecret', e.target.value)}
+                                            placeholder="SEC..."
                                         />
                                     </div>
                                 </div>
@@ -330,8 +376,8 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                         <div className="space-y-4">
                             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">日期显示标准</label>
                             <div className="relative group">
-                                <select 
-                                    className="w-full appearance-none border-2 border-slate-100 dark:border-slate-700 rounded-[1.5rem] px-6 py-5 bg-white dark:bg-slate-900 text-lg font-black text-slate-800 dark:text-white outline-none focus:border-emerald-500 shadow-sm transition-all"
+                                <select
+                                    className="w-full appearance-none border-2 border-slate-100 dark:border-slate-700 rounded-[1.5rem] px-6 py-5 bg-white dark:bg-slate-900 text-lg font-black text-slate-800 dark:text-white outline-none focus:border-primary-500 shadow-sm transition-all"
                                     value={localPrefs.dateFormat}
                                     onChange={e => setLocalPrefs({...localPrefs, dateFormat: e.target.value as any})}
                                 >
@@ -349,15 +395,15 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">财务币种与数据格式</label>
                             <div className="grid grid-cols-3 gap-4">
                                 {['¥', '$', '€'].map(symbol => (
-                                    <button 
+                                    <button
                                         key={symbol}
                                         onClick={() => setLocalPrefs({
-                                            ...localPrefs, 
+                                            ...localPrefs,
                                             numberFormat: { ...localPrefs.numberFormat, currencySymbol: symbol as any }
                                         })}
                                         className={`py-8 rounded-[1.5rem] text-4xl font-black transition-all border-2 shadow-sm ${
-                                            localPrefs.numberFormat.currencySymbol === symbol 
-                                            ? 'bg-emerald-50/40 border-emerald-500 text-emerald-600 dark:bg-emerald-900/20 shadow-lg' 
+                                            localPrefs.numberFormat.currencySymbol === symbol
+                                            ? 'bg-primary-50/40 border-primary-500 text-primary-600 dark:bg-primary-900/20 shadow-lg'
                                             : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-700 text-slate-200 dark:text-slate-700 hover:border-slate-200'
                                         }`}
                                     >
@@ -368,14 +414,14 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
 
                             <div className="flex items-center justify-between p-6 bg-slate-50/50 dark:bg-slate-900/30 rounded-[1.5rem] border-2 border-slate-50 dark:border-slate-800 transition-all">
                                 <span className="text-base font-black text-slate-700 dark:text-slate-200">开启千分位分隔符 <span className="text-slate-400 font-bold opacity-60 ml-2">(1,000.00)</span></span>
-                                <input 
-                                    type="checkbox" 
-                                    checked={localPrefs.numberFormat.useThousandsSeparator} 
+                                <input
+                                    type="checkbox"
+                                    checked={localPrefs.numberFormat.useThousandsSeparator}
                                     onChange={e => setLocalPrefs({
-                                        ...localPrefs, 
+                                        ...localPrefs,
                                         numberFormat: { ...localPrefs.numberFormat, useThousandsSeparator: e.target.checked }
                                     })}
-                                    className="w-7 h-7 rounded-lg text-primary-600 border-slate-300 focus:ring-emerald-500 transition-all cursor-pointer shadow-sm"
+                                    className="w-7 h-7 rounded-lg text-primary-600 border-slate-300 focus:ring-primary-500 transition-all cursor-pointer shadow-sm"
                                 />
                             </div>
                         </div>
@@ -386,17 +432,41 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                 {activeTab === 'theme' && (
                     <div className="space-y-8 animate-in fade-in transition-all">
                         <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-5 tracking-[0.3em] ml-1">亮暗模式</label>
+                            <div className="grid grid-cols-2 gap-4">
+                                {[
+                                    { id: 'light' as const, label: '浅色模式', desc: '白天办公更清晰', icon: Sun },
+                                    { id: 'dark' as const, label: '深色模式', desc: '夜间查看更柔和', icon: Moon }
+                                ].map(option => (
+                                    <button
+                                        key={option.id}
+                                        onClick={() => setLocalTheme(option.id)}
+                                        className={`p-5 rounded-2xl border-2 text-left transition-all active:scale-95 ${
+                                            localTheme === option.id
+                                            ? 'bg-primary-50 border-primary-500 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                                            : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-700 text-slate-500 dark:text-slate-300 hover:border-primary-200'
+                                        }`}
+                                    >
+                                        <option.icon className="w-6 h-6 mb-4" />
+                                        <p className="text-sm font-black">{option.label}</p>
+                                        <p className="mt-1 text-[10px] font-bold opacity-60">{option.desc}</p>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
                             <label className="block text-[10px] font-black text-slate-400 uppercase mb-5 tracking-[0.3em] ml-1">品牌配色选择</label>
                             <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
                                 {themes.map(t => (
-                                    <button 
-                                        key={t.id} 
-                                        onClick={() => setLocalPrefs(p => ({...p, themeColor: t.id}))} 
+                                    <button
+                                        key={t.id}
+                                        onClick={() => setLocalPrefs(p => ({...p, themeColor: t.id}))}
                                         className={`aspect-square rounded-[1.5rem] flex flex-col items-center justify-center transition-all hover:scale-110 active:scale-95 ${
-                                            localPrefs.themeColor === t.id 
-                                            ? 'ring-4 ring-offset-4 ring-slate-100 dark:ring-offset-slate-800 scale-105 shadow-2xl border-4 border-white' 
+                                            localPrefs.themeColor === t.id
+                                            ? 'ring-4 ring-offset-4 ring-slate-100 dark:ring-offset-slate-800 scale-105 shadow-2xl border-4 border-white'
                                             : 'opacity-60 grayscale-[0.5] hover:grayscale-0 hover:opacity-100'
-                                        }`} 
+                                        }`}
                                         style={{ backgroundColor: t.color }}
                                     >
                                         {localPrefs.themeColor === t.id && <CheckCircle2 className="w-8 h-8 text-white drop-shadow-lg" />}
@@ -408,12 +478,12 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                             <label className="block text-[10px] font-black text-slate-400 uppercase mb-5 tracking-[0.3em] ml-1">界面字体比例</label>
                             <div className="grid grid-cols-4 gap-4">
                                 {['small', 'medium', 'large', 'xlarge'].map(size => (
-                                    <button 
-                                        key={size} 
-                                        onClick={() => setLocalPrefs(p => ({...p, fontSize: size as any}))} 
+                                    <button
+                                        key={size}
+                                        onClick={() => setLocalPrefs(p => ({...p, fontSize: size as any}))}
                                         className={`py-6 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-all active:scale-95 shadow-sm ${
-                                            localPrefs.fontSize === size 
-                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' 
+                                            localPrefs.fontSize === size
+                                            ? 'bg-primary-50 border-primary-500 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
                                             : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-700 text-slate-300'
                                         }`}
                                     >
@@ -431,15 +501,15 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                     <div className="space-y-8 animate-in fade-in transition-all pb-10">
                         <label className="block text-[10px] font-black text-slate-400 uppercase mb-4 tracking-[0.3em] ml-1">气象定位与展示策略</label>
                         <div className="flex gap-2 bg-slate-100/60 dark:bg-slate-950 p-1.5 rounded-[1.5rem] mb-6 shadow-inner">
-                            <button 
+                            <button
                                 onClick={() => setLocalPrefs(p => ({...p, weatherLocation: { mode: 'auto' }}))}
-                                className={`flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${localPrefs.weatherLocation.mode === 'auto' ? 'bg-white dark:bg-slate-800 text-emerald-600 shadow-xl' : 'text-slate-400'}`}
+                                className={`flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${localPrefs.weatherLocation.mode === 'auto' ? 'bg-white dark:bg-slate-800 text-primary-600 shadow-xl' : 'text-slate-400'}`}
                             >
                                 智能识别
                             </button>
-                            <button 
+                            <button
                                 onClick={() => setLocalPrefs(p => ({...p, weatherLocation: { ...p.weatherLocation, mode: 'manual' }}))}
-                                className={`flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${localPrefs.weatherLocation.mode === 'manual' ? 'bg-white dark:bg-slate-800 text-emerald-600 shadow-xl' : 'text-slate-400'}`}
+                                className={`flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${localPrefs.weatherLocation.mode === 'manual' ? 'bg-white dark:bg-slate-800 text-primary-600 shadow-xl' : 'text-slate-400'}`}
                             >
                                 手动指派
                             </button>
@@ -449,8 +519,8 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">选择省份/直辖市</label>
-                                        <select 
-                                            className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-white dark:bg-slate-900 dark:text-white font-black text-sm outline-none focus:border-emerald-500 shadow-sm"
+                                        <select
+                                            className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-white dark:bg-slate-900 dark:text-white font-black text-sm outline-none focus:border-primary-500 shadow-sm"
                                             value={selectedProvince}
                                             onChange={e => setSelectedProvince(e.target.value)}
                                         >
@@ -460,8 +530,8 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">选择地级市</label>
-                                        <select 
-                                            className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-white dark:bg-slate-900 dark:text-white font-black text-sm outline-none focus:border-emerald-500 shadow-sm disabled:opacity-30 transition-opacity"
+                                        <select
+                                            className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-4 bg-white dark:bg-slate-900 dark:text-white font-black text-sm outline-none focus:border-primary-500 shadow-sm disabled:opacity-30 transition-opacity"
                                             disabled={!selectedProvince}
                                             value={localPrefs.weatherLocation.city || ''}
                                             onChange={e => {
@@ -477,7 +547,7 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                                 <div className="bg-slate-50 dark:bg-slate-900/50 p-8 rounded-[2.5rem] border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center text-center shadow-inner group">
                                     {localPrefs.weatherLocation.city ? (
                                         <div className="animate-in fade-in duration-500">
-                                            <MapPin className="w-12 h-12 text-emerald-500 mb-3 group-hover:scale-110 transition-transform" />
+                                            <MapPin className="w-12 h-12 text-primary-500 mb-3 group-hover:scale-110 transition-transform" />
                                             <p className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">定位已锁定: {localPrefs.weatherLocation.city}</p>
                                         </div>
                                     ) : (
@@ -487,7 +557,7 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
                             </div>
                         ) : (
                             <div className="bg-slate-50 dark:bg-slate-900/30 p-12 rounded-[3rem] border-2 border-slate-100 dark:border-slate-700 flex flex-col items-center gap-6 shadow-inner text-center animate-in zoom-in-95">
-                                <Globe className="w-16 h-16 text-emerald-500 relative z-10 animate-spin-slow" />
+                                <Globe className="w-16 h-16 text-primary-500 relative z-10 animate-spin-slow" />
                                 <h4 className="font-black text-slate-800 dark:text-white text-lg uppercase tracking-tight">Geo-IP 智能定位模式</h4>
                             </div>
                         )}
@@ -498,8 +568,8 @@ const UserPreferencesModal: React.FC<UserPreferencesModalProps> = ({ isOpen, onC
 
         {/* Footer Actions */}
         <div className="flex justify-end gap-5 mt-8 pt-6 border-t border-slate-100 dark:border-slate-700 shrink-0">
-          <button onClick={onClose} className="px-8 py-3 text-slate-400 font-black uppercase tracking-[0.2em] text-[10px] hover:text-slate-600 dark:hover:text-slate-300 transition-colors">取消</button>
-          <button onClick={handleSave} className="px-10 py-4 bg-emerald-600 text-white rounded-[1.5rem] hover:bg-emerald-700 shadow-[0_20px_40px_rgba(16,185,129,0.3)] font-black transition-all active:scale-95 flex items-center gap-3 uppercase tracking-widest text-xs border border-white/10 group">
+          <button onClick={handleCancel} className="px-8 py-3 text-slate-400 font-black uppercase tracking-[0.2em] text-[10px] hover:text-slate-600 dark:hover:text-slate-300 transition-colors">取消</button>
+          <button onClick={handleSave} className="px-10 py-4 bg-primary-600 text-white rounded-[1.5rem] hover:bg-primary-700 shadow-xl shadow-primary-500/25 font-black transition-all active:scale-95 flex items-center gap-3 uppercase tracking-widest text-xs border border-white/10 group">
             <Save className="w-5 h-5 group-hover:rotate-12 transition-transform" /> 同步个人配置
           </button>
         </div>

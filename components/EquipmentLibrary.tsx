@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Equipment, User } from '../types';
-import { Plus, Search, Zap, Ruler, Settings, Tag, Trash2, Image as ImageIcon, Upload, X, Edit2, Eye, Download } from 'lucide-react';
+import { Plus, Search, Zap, Ruler, Settings, Tag, Trash2, Image as ImageIcon, Upload, X, Edit2, Eye, Download, Sparkles, FileText, CheckCircle2 } from 'lucide-react';
 import { API_URL, apiFetch } from '../lib/api';
+import { fetchAiModels, streamAiChat } from '../lib/ai-client';
 
 interface EquipmentLibraryProps {
   equipmentList: Equipment[];
@@ -11,11 +12,76 @@ interface EquipmentLibraryProps {
   currentUser: User;
 }
 
+
+type EquipmentDraft = Omit<Equipment, 'id'>;
+
+const cleanCell = (value?: string) => String(value || '').replace(/^"|"$/g, '').trim();
+const splitSmartLine = (line: string) => line.includes(',')
+  ? line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(cleanCell)
+  : line.split(/\t|\s{2,}|[，；;]/).map(cleanCell).filter(Boolean);
+
+const inferCategory = (text: string) => {
+  if (/灶|炉|蒸|煮|汤|炒|烤|热/i.test(text)) return '热厨设备';
+  if (/冷|冰|冻|保鲜|雪柜/i.test(text)) return '制冷设备';
+  if (/洗|消毒|洁碟|洗碗/i.test(text)) return '洗涤消毒';
+  if (/烟|排风|风机|净化/i.test(text)) return '排烟系统';
+  if (/台|架|柜|星盆|水池|不锈钢/i.test(text)) return '不锈钢制品';
+  if (/机|切|搅|绞|压面|和面/i.test(text)) return '食品机械';
+  return '其他';
+};
+
+const parseEquipmentText = (text: string): EquipmentDraft[] => {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+  const firstCells = splitSmartLine(lines[0]).map(cell => cell.toLowerCase());
+  const hasHeader = firstCells.some(cell => /设备|名称|型号|品牌|分类|尺寸|功率|电压|燃气|备注|name|model/.test(cell));
+  const header = hasHeader ? firstCells : [];
+  const rows = hasHeader ? lines.slice(1) : lines;
+  const indexOf = (patterns: RegExp[]) => header.findIndex(cell => patterns.some(pattern => pattern.test(cell)));
+  const indexes = {
+    name: indexOf([/设备/, /名称/, /name/]),
+    model: indexOf([/型号/, /规格/, /model/]),
+    brand: indexOf([/品牌/, /brand/]),
+    category: indexOf([/分类/, /类别/, /category/]),
+    dimensions: indexOf([/尺寸/, /规格尺寸/, /dimension/]),
+    power: indexOf([/功率/, /电压/, /power/]),
+    waterGas: indexOf([/给排水/, /燃气/, /接驳/, /water/, /gas/]),
+    description: indexOf([/备注/, /说明/, /描述/, /note/, /description/])
+  };
+  const pick = (cells: string[], key: keyof typeof indexes, fallbackIndex: number) => cleanCell(cells[indexes[key] >= 0 ? indexes[key] : fallbackIndex]);
+
+  return rows.map(line => {
+    const cells = splitSmartLine(line);
+    const raw = cells.join(' ');
+    const dimensions = pick(cells, 'dimensions', 4) || (raw.match(/\d{3,5}\s*[xX*×]\s*\d{2,5}(?:\s*[xX*×]\s*\d{2,5})?/)?.[0] || '');
+    const powerSpecs = pick(cells, 'power', 5) || (raw.match(/(?:220|380)\s*V[^，,;；\s]*|\d+(?:\.\d+)?\s*(?:kw|kW|KW)/)?.[0] || '');
+    const waterGasSpecs = pick(cells, 'waterGas', 6) || (raw.match(/(?:DN\s*\d+|给水[^，,;；]*|排水[^，,;；]*|燃气[^，,;；]*)/i)?.[0] || '');
+    const name = pick(cells, 'name', 0);
+    const model = pick(cells, 'model', 1) || dimensions || '待补型号';
+    if (!name || name.length < 2) return null;
+    return {
+      name,
+      model,
+      brand: pick(cells, 'brand', 2) || '待补品牌',
+      category: pick(cells, 'category', 3) || inferCategory(raw),
+      dimensions,
+      powerSpecs,
+      waterGasSpecs,
+      description: pick(cells, 'description', 7) || raw
+    };
+  }).filter(Boolean) as EquipmentDraft[];
+};
+
 const EquipmentLibrary: React.FC<EquipmentLibraryProps> = ({ equipmentList, onAddEquipment, onUpdateEquipment, onDeleteEquipment, currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<Equipment | null>(null);
+  const [showAiImportModal, setShowAiImportModal] = useState(false);
+  const [aiImportText, setAiImportText] = useState('');
+  const [aiImportPreview, setAiImportPreview] = useState<EquipmentDraft[]>([]);
+  const [isAiOrganizing, setIsAiOrganizing] = useState(false);
+  const [aiImportFeedback, setAiImportFeedback] = useState('');
   
   // FIX: Counter for uploads
   const [uploadingCount, setUploadingCount] = useState(0);
@@ -25,6 +91,7 @@ const EquipmentLibrary: React.FC<EquipmentLibraryProps> = ({ equipmentList, onAd
   const [newEq, setNewEq] = useState<Partial<Equipment>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const aiImportInputRef = useRef<HTMLInputElement>(null);
 
   const filteredEquipment = equipmentList.filter(e => 
     e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -145,6 +212,79 @@ const EquipmentLibrary: React.FC<EquipmentLibraryProps> = ({ equipmentList, onAd
       link.click();
   };
 
+  const updateAiImportText = (text: string) => {
+      setAiImportText(text);
+      setAiImportPreview(parseEquipmentText(text));
+      setAiImportFeedback('已用本地规则生成预览，可点击 AI 重新整理提高准确度。');
+  };
+
+  const handleAiImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = evt => updateAiImportText(String(evt.target?.result || ''));
+      reader.readAsText(file);
+      e.target.value = '';
+  };
+
+  const handleConfirmAiImport = () => {
+      if (aiImportPreview.length === 0) return alert('没有识别到可导入的设备，请粘贴清单或上传文本/CSV。');
+      aiImportPreview.forEach(item => onAddEquipment({ ...item, id: Math.random().toString(36).slice(2, 11) }));
+      alert(`已整理并导入 ${aiImportPreview.length} 条设备参数。`);
+      setShowAiImportModal(false);
+      setAiImportText('');
+      setAiImportPreview([]);
+      setAiImportFeedback('');
+  };
+
+  const handleAiOrganize = async () => {
+      const text = aiImportText.trim();
+      if (!text) return alert('请先粘贴清单或上传文件。');
+      setIsAiOrganizing(true);
+      setAiImportFeedback('正在调用系统 AI 模型整理设备参数...');
+      try {
+          const models = await fetchAiModels(API_URL);
+          const model = models[0];
+          if (!model) throw new Error('未启用 AI 模型');
+          let output = '';
+          await streamAiChat(
+            API_URL,
+            {
+              modelId: model.id,
+              reasoning: false,
+              messages: [{
+                role: 'user',
+                content: `你是厨房工程设备参数录入助手。请把下面的设备清单或笔记整理成严格 JSON 数组，不要输出解释。数组每项字段固定为 name, model, brand, category, dimensions, powerSpecs, waterGasSpecs, description。缺失字段用空字符串；category 从 热厨设备、制冷设备、洗涤消毒、排烟系统、不锈钢制品、食品机械、其他 中选择。\n\n原始内容：\n${text}`
+              }]
+            },
+            token => { output += token; }
+          );
+          const jsonText = output.match(/\[[\s\S]*\]/)?.[0] || '';
+          const parsed = JSON.parse(jsonText);
+          if (!Array.isArray(parsed)) throw new Error('AI 返回格式不是数组');
+          const normalized = parsed.map(item => ({
+            name: cleanCell(item.name),
+            model: cleanCell(item.model) || '待补型号',
+            brand: cleanCell(item.brand) || '待补品牌',
+            category: cleanCell(item.category) || inferCategory(JSON.stringify(item)),
+            dimensions: cleanCell(item.dimensions),
+            powerSpecs: cleanCell(item.powerSpecs),
+            waterGasSpecs: cleanCell(item.waterGasSpecs),
+            description: cleanCell(item.description)
+          })).filter(item => item.name) as EquipmentDraft[];
+          if (normalized.length === 0) throw new Error('AI 未识别到有效设备');
+          setAiImportPreview(normalized);
+          setAiImportFeedback(`AI 已整理 ${normalized.length} 条设备，请核对后导入。`);
+      } catch (error) {
+          console.warn('AI equipment organize fallback', error);
+          const fallback = parseEquipmentText(text);
+          setAiImportPreview(fallback);
+          setAiImportFeedback(`AI 整理暂不可用，已使用本地规则识别 ${fallback.length} 条。`);
+      } finally {
+          setIsAiOrganizing(false);
+      }
+  };
+
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -208,6 +348,10 @@ const EquipmentLibrary: React.FC<EquipmentLibraryProps> = ({ equipmentList, onAd
           </button>
           {(currentUser.role === 'Admin' || currentUser.permission === 'ReadWrite') && (
               <>
+                <button onClick={() => setShowAiImportModal(true)} className="px-3 py-2.5 bg-primary-50 dark:bg-primary-900/30 border border-primary-100 dark:border-primary-800 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 flex items-center gap-2 text-xs font-black" title="上传清单或笔记，自动整理设备参数">
+                    <Sparkles className="w-4 h-4" />
+                    <span className="hidden lg:inline">AI整理</span>
+                </button>
                 <button onClick={() => importInputRef.current?.click()} className="p-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400" title="批量导入设备">
                     <Upload className="w-4 h-4" />
                 </button>
@@ -320,6 +464,72 @@ const EquipmentLibrary: React.FC<EquipmentLibraryProps> = ({ equipmentList, onAd
                </div>
           )}
       </div>
+
+
+      {showAiImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 w-full max-w-5xl rounded-[2rem] shadow-2xl max-h-[92vh] overflow-hidden animate-in zoom-in-95 flex flex-col">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="p-3 rounded-2xl bg-primary-600 text-white shadow-lg shadow-primary-500/20"><Sparkles className="w-6 h-6" /></div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">AI 整理设备参数</h3>
+                  <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">粘贴清单、报价备注或上传 CSV/TXT，可调用系统 AI 模型整理字段；模型不可用时自动使用本地规则兜底。</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAiImportModal(false)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"><X className="w-6 h-6 text-slate-400" /></button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 overflow-y-auto">
+              <div className="p-6 border-b lg:border-b-0 lg:border-r border-slate-100 dark:border-slate-700">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">原始清单 / 笔记</label>
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleAiOrganize} disabled={isAiOrganizing || !aiImportText.trim()} className="px-3 py-2 rounded-xl bg-primary-600 text-white text-xs font-black hover:bg-primary-700 disabled:opacity-40 flex items-center gap-2"><Sparkles className="w-4 h-4" />{isAiOrganizing ? '整理中' : 'AI整理'}</button>
+                    <input ref={aiImportInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleAiImportFile} />
+                    <button onClick={() => aiImportInputRef.current?.click()} className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-500 hover:border-primary-500 flex items-center gap-2"><FileText className="w-4 h-4" />上传文件</button>
+                  </div>
+                </div>
+                <textarea
+                  value={aiImportText}
+                  onChange={event => updateAiImportText(event.target.value)}
+                  className="w-full h-[28rem] rounded-2xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4 text-sm font-medium leading-6 text-slate-800 dark:text-slate-100 outline-none focus:border-primary-500"
+                  placeholder={'示例：\n双头大锅灶, SDGT-1200, 海牛, 热厨设备, 1200x800x800, 380V/24kW, DN25给水/DN40排水, 食堂热厨区\n四门高身雪柜 1220x760x1950 220V/0.6kW 制冷设备'}
+                />
+              </div>
+              <div className="p-6 bg-slate-50/70 dark:bg-slate-900/30">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">整理预览</p>
+                  <span className="rounded-full bg-white dark:bg-slate-800 px-3 py-1 text-xs font-black text-primary-600 border border-slate-100 dark:border-slate-700">{aiImportPreview.length} 条</span>
+                </div>
+                {aiImportFeedback && <p className="mb-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 px-3 py-2 text-xs font-bold text-slate-500 dark:text-slate-300">{aiImportFeedback}</p>}
+                <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1 custom-scrollbar">
+                  {aiImportPreview.length === 0 ? (
+                    <div className="h-80 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center text-slate-300">
+                      <Sparkles className="w-12 h-12 mb-3 opacity-40" />
+                      <p className="text-sm font-black">等待清单内容</p>
+                      <p className="mt-1 text-xs font-bold">支持 CSV、制表符、普通文字笔记</p>
+                    </div>
+                  ) : aiImportPreview.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="rounded-2xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0"><p className="font-black text-slate-900 dark:text-white truncate">{item.name}</p><p className="mt-1 text-xs font-mono text-slate-400 truncate">{item.model}</p></div>
+                        <span className="rounded-full bg-primary-50 dark:bg-primary-900/30 px-2.5 py-1 text-[10px] font-black text-primary-600 dark:text-primary-300">{item.category}</span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                        <span>尺寸: {item.dimensions || '-'}</span><span>功率: {item.powerSpecs || '-'}</span><span className="col-span-2">接驳: {item.waterGasSpecs || '-'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3 bg-white dark:bg-slate-800">
+              <button onClick={() => setShowAiImportModal(false)} className="px-5 py-3 rounded-xl text-slate-500 font-black hover:bg-slate-100 dark:hover:bg-slate-700">取消</button>
+              <button onClick={handleConfirmAiImport} className="px-6 py-3 rounded-xl bg-primary-600 text-white font-black hover:bg-primary-700 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />确认导入</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Equipment Modal */}
       {showAddModal && (

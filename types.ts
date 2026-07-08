@@ -81,7 +81,8 @@ export interface Client {
   type: 'Hotel' | 'Restaurant' | 'Canteen' | 'Government' | 'SchoolCanteen' | 'SOE' | 'Private' | 'Other';
   contacts: Contact[];
   createdAt: string;
-  creatorId?: string; 
+  creatorId?: string;
+  creatorName?: string;
 }
 
 export interface Equipment {
@@ -96,6 +97,8 @@ export interface Equipment {
   description?: string;
   imageUrl?: string;
   createdAt?: string;
+  creatorId?: string;
+  creatorName?: string;
 }
 
 export interface DocItem {
@@ -108,6 +111,8 @@ export interface DocItem {
   url?: string; 
   content?: string; 
   createdAt?: string;
+  creatorId?: string;
+  creatorName?: string;
 }
 
 export interface ScheduleItem {
@@ -157,6 +162,7 @@ export type ProductionStatus = 'Waiting' | 'InStock' | 'Shipped';
 
 export interface ProductionUnit {
   id: string;
+  serialNumber?: string;
   name: string;
   model: string;
   quantity: number;
