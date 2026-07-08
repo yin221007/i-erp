@@ -1,20 +1,131 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# i ERP 1.11
 
-# Run and deploy your AI Studio app
+i ERP 是面向工程项目管理的私有化 ERP 系统，覆盖工程项目、客户资料、生产进度、审批流程、工程回款、日程提醒、工程档案、设备参数、团队沟通、AI 中心和管理员备份恢复。
 
-This contains everything you need to run your app locally.
+> 公开仓库不包含生产业务数据、账号密码、数据库密码、API Key、上传附件和内部排障记录。生产数据应保存在私有数据库和挂载目录中。
 
-View your app in AI Studio: https://ai.studio/apps/drive/1fU2uMpEbqNCQn85SyJnhPx5iNkWXntOv
+## 主要功能
 
-## Run Locally
+- 首页工作台：按账号权限展示待处理事项、风险、回款、生产和项目统计。
+- 工程项目：按统一工程状态展示待启动、在建、已竣工项目。
+- 客户管理：按服务端权限规则读取客户资料，避免前端假隔离。
+- 生产进度：支持按项目维护待生产、已生产/入库、已发货清单。
+- 工程回款：按尾款到期未支付识别风险，已 100% 回款项目默认靠后。
+- 工程档案：支持项目资料归档、预览、下载和工程图纸类文件上传。
+- 审批流程：展示待审批、已审批、审批卡点和通知。
+- AI 中心：支持 DeepSeek、MiniMax 等模型配置入口。
+- 数据维护：支持手动备份、定时备份、管理员恢复和回退演练。
 
-**Prerequisites:**  Node.js
+## 本地预览
 
+本地预览只用于界面和接口联调，不会自动包含群晖生产数据。
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev -- --host 127.0.0.1 --port 4173
+```
+
+打开：
+
+```text
+http://127.0.0.1:4173/
+```
+
+验证后端代理是否可用：
+
+```bash
+curl http://127.0.0.1:4173/api/auth/me
+```
+
+正常未登录返回：
+
+```json
+{"error":"Authentication required"}
+```
+
+如果返回 502，说明前端启动了，但后端或代理没有连通。先修后端连接，不要只看页面是否打开。
+
+## 环境变量
+
+复制 `.env.example` 后按实际环境填写：
+
+```bash
+cp .env.example .env
+```
+
+关键配置：
+
+- `DB_PASSWORD`：数据库密码，不能提交到 Git。
+- `SESSION_SECRET`：至少 32 位随机字符串。
+- `MAINTENANCE_JOB_SECRET`：维护任务签名密钥。
+- `PUBLIC_ORIGINS`：公网反代域名，例如 `https://erp.example.com`。
+- `BACKUP_PATH`：备份目录。
+- `UPLOAD_DIR`：附件上传目录。
+- `DEEPSEEK_API_KEY`：DeepSeek 官方 API Key，可留空后在系统设置中配置。
+- `MINIMAX_API_KEY`：MiniMax API Key，可留空后在系统设置中配置。
+
+## 测试与构建
+
+```bash
+npm test
+npm run build
+npm run verify:release
+```
+
+发布前至少执行 `npm run verify:release`。它会覆盖测试、生产构建和发布配置校验。
+
+## 群晖部署方法
+
+生产部署采用蓝绿发布，核心原则是：先备份、再演练、再切换，旧版本必须保留可回退。
+
+1. 在群晖上准备独立 release 目录。
+2. 上传当前源码或 release 包。
+3. 使用 `.env` 填写数据库、上传目录、备份目录和端口。
+4. 执行发布前备份，确认 `manifest.sha256` 和表数量。
+5. 使用克隆数据库和克隆上传目录做恢复演练。
+6. 启动新版本容器并验证 `/health/ready`。
+7. 验证原账号、原密码、客户资料、工程档案、上传下载、回款、生产和审批通知。
+8. 确认无误后再切换 Lucky 反代到新前端端口。
+9. 旧容器、旧镜像、旧 Compose 和升级前快照至少保留 7 天。
+
+详细流程见：
+
+- `docs/runbooks/upgrade.md`
+- `docs/runbooks/rollback.md`
+- `docs/runbooks/admin-backup-restore.md`
+
+## 管理员备份与恢复
+
+系统设置中的数据维护用于恢复数据库和上传附件，但不更换应用版本。
+
+- 自动备份：北京时间 06:30 和 18:30。
+- 手动备份：管理员可在系统设置中触发。
+- 恢复备份：恢复前会创建回滚快照，失败会自动恢复原状态。
+- 空间上限：按部署配置控制，当前建议不超过 500 GB。
+
+如果应用版本本身有问题，使用 `docs/runbooks/rollback.md` 回退旧版本，不要只做数据恢复。
+
+## GitHub 发布规则
+
+每次更新发布必须执行：
+
+1. 先确认版本号。
+2. 更新 `package.json` 和 `package-lock.json`。
+3. 推送更新分支。
+4. 合并到 `main`。
+5. 创建对应 GitHub Release，例如 `v1.11`。
+6. Release 说明必须包含使用方法、部署方法、验证方法和回退提醒。
+
+## 数据与隐私
+
+不要提交以下内容：
+
+- `db.json`
+- `.env`
+- 数据库导出
+- 上传附件
+- API Key
+- 群晖账号密码
+- 内部错误记录和排障日志
+
+公开仓库只保存代码、文档、测试和脱敏配置示例。
