@@ -120,6 +120,8 @@ test('application backends run as the Synology deployment identity', async () =>
     assert.match(backend.user, /NAS_GID/);
   }
   assert.match(dockerfile, /USER node/);
+  assert.match(dockerfile, /chmod 0444 \/app\/server\.js/);
+  assert.match(dockerfile, /chmod -R a=rX \/app\/server/);
   assert.doesNotMatch(dockerfile, /chmod 777/);
 });
 

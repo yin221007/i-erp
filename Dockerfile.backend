@@ -21,7 +21,11 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY --chown=node:node server.js ./
 COPY --chown=node:node server ./server
 
-RUN install -d -o node -g node -m 0750 uploads
+# 生产容器由 Compose 映射为 NAS 专用 UID/GID；不要依赖构建阶段的
+# node 用户所有权。应用源码只读开放，上传目录仍由挂载目录控制写权限。
+RUN chmod 0444 /app/server.js \
+    && chmod -R a=rX /app/server \
+    && install -d -o node -g node -m 0750 uploads
 
 USER node
 
