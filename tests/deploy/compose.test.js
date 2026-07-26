@@ -107,11 +107,12 @@ test('nginx refreshes the app entry while caching hashed assets immutably', asyn
 });
 
 test('application backends run as the Synology deployment identity', async () => {
-  const [baseSource, blue, green, dockerfile] = await Promise.all([
+  const [baseSource, blue, green, dockerfile, backupDockerfile] = await Promise.all([
     readFile(new URL('docker-compose.yml', root), 'utf8'),
     compose('docker-compose.blue.yml'),
     compose('docker-compose.green.yml'),
-    readFile(new URL('Dockerfile.backend', root), 'utf8')
+    readFile(new URL('Dockerfile.backend', root), 'utf8'),
+    readFile(new URL('Dockerfile.backup', root), 'utf8')
   ]);
   const base = parse(baseSource);
 
@@ -122,7 +123,9 @@ test('application backends run as the Synology deployment identity', async () =>
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /chmod 0444 \/app\/server\.js/);
   assert.match(dockerfile, /chmod -R a=rX \/app\/server/);
+  assert.match(backupDockerfile, /chmod -R a=rX \/app\/scripts \/app\/server/);
   assert.doesNotMatch(dockerfile, /chmod 777/);
+  assert.doesNotMatch(backupDockerfile, /chmod 777/);
 });
 
 test('the base stack contains no production host literals and bounds backups', async () => {
