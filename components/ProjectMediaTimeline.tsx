@@ -112,10 +112,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
   const [uploadNodeId, setUploadNodeId] = useState('');
   const [uploadAlbumId, setUploadAlbumId] = useState(createRecordId);
   const [existingAlbumId, setExistingAlbumId] = useState('');
-  const [albumTitle, setAlbumTitle] = useState(() =>
-    defaultAlbumTitle(localToday(), PROJECT_MEDIA_PHASES[0])
-  );
-  const [albumTitleEdited, setAlbumTitleEdited] = useState(false);
+  const [albumTitle, setAlbumTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
@@ -181,6 +178,11 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     [allAlbums, capturedAt, uploadPhase]
   );
   const activeAlbum = allAlbums.find(album => album.id === activeAlbumId) || null;
+  const suggestedAlbumTitle = defaultAlbumTitle(
+    capturedAt,
+    uploadPhase,
+    availableNodes.find(node => node.id === uploadNodeId)?.title
+  );
 
   const dateGroups = useMemo(() => {
     const groups = new Map<string, MediaAlbum[]>();
@@ -228,8 +230,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     setUploadNodeId('');
     setUploadAlbumId(createRecordId());
     setExistingAlbumId('');
-    setAlbumTitle(defaultAlbumTitle(today, PROJECT_MEDIA_PHASES[0]));
-    setAlbumTitleEdited(false);
+    setAlbumTitle('');
     setDescription('');
     setUploadProgress('');
     setFormError('');
@@ -744,8 +745,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                       setUploadNodeId('');
                       setExistingAlbumId('');
                       setUploadAlbumId(createRecordId());
-                      setAlbumTitleEdited(false);
-                      setAlbumTitle(defaultAlbumTitle(capturedAt, phase));
+                      setAlbumTitle('');
                     }}
                     disabled={isUploading}
                     className="min-h-11 w-full rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-black text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
@@ -767,9 +767,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                       setCapturedAt(date);
                       setExistingAlbumId('');
                       setUploadAlbumId(createRecordId());
-                      setAlbumTitleEdited(false);
-                      const nodeTitle = availableNodes.find(node => node.id === uploadNodeId)?.title;
-                      setAlbumTitle(defaultAlbumTitle(date, uploadPhase, nodeTitle));
+                      setAlbumTitle('');
                     }}
                     disabled={isUploading}
                     className="min-h-11 w-full rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-black text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
@@ -788,9 +786,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     setExistingAlbumId(selectedId);
                     if (!selectedId) {
                       setUploadAlbumId(createRecordId());
-                      setAlbumTitleEdited(false);
-                      const nodeTitle = availableNodes.find(node => node.id === uploadNodeId)?.title;
-                      setAlbumTitle(defaultAlbumTitle(capturedAt, uploadPhase, nodeTitle));
+                      setAlbumTitle('');
                       return;
                     }
                     const selectedAlbum = matchingExistingAlbums.find(album => album.id === selectedId);
@@ -798,12 +794,11 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     setUploadAlbumId(selectedAlbum.id);
                     setUploadNodeId(selectedAlbum.workflowNodeId || '');
                     setAlbumTitle(selectedAlbum.title);
-                    setAlbumTitleEdited(true);
                   }}
                   disabled={isUploading}
                   className="min-h-11 w-full rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-black text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 >
-                  <option value="">新建影像文件夹</option>
+                  <option value="">新建影像文件夹（自定义命名）</option>
                   {matchingExistingAlbums.map(album => (
                     <option key={album.id} value={album.id}>
                       追加到：{album.title}（现有 {album.items.length} 项）
@@ -811,7 +806,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                   ))}
                 </select>
                 <span className="mt-1 block text-[10px] font-bold text-slate-400">
-                  仅显示当前阶段、当前拍摄日期下已有的文件夹
+                  新建时请在下方自定义名称；这里只显示当前阶段、当前拍摄日期下已有的文件夹
                 </span>
               </label>
 
@@ -824,11 +819,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     value={uploadNodeId}
                     onChange={event => {
                       const nodeId = event.target.value;
-                      const nodeTitle = availableNodes.find(node => node.id === nodeId)?.title;
                       setUploadNodeId(nodeId);
-                      if (!albumTitleEdited) {
-                        setAlbumTitle(defaultAlbumTitle(capturedAt, uploadPhase, nodeTitle));
-                      }
                     }}
                     disabled={isUploading || Boolean(existingAlbumId)}
                     className="min-h-11 w-full rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-black text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
@@ -841,18 +832,17 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                 </label>
                 <label className="block">
                   <span className="mb-1.5 block text-xs font-black text-slate-700 dark:text-slate-200">
-                    文件夹名称 <span className="text-red-500">*</span>
+                    自定义文件夹名称 <span className="text-red-500">*</span>
                   </span>
                   <input
                     type="text"
                     value={albumTitle}
                     onChange={event => {
                       setAlbumTitle(event.target.value);
-                      setAlbumTitleEdited(true);
                     }}
                     maxLength={200}
                     disabled={isUploading || Boolean(existingAlbumId)}
-                    placeholder="例如：设备定位现场记录"
+                    placeholder={`建议：${suggestedAlbumTitle}`}
                     className="min-h-11 w-full rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-black text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                   />
                 </label>

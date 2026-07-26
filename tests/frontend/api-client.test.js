@@ -21,6 +21,12 @@ const userManagerUrl = new URL('../../components/UserManager.tsx', import.meta.u
 const documentationUrl = new URL('../../components/Documentation.tsx', import.meta.url);
 const safeUrlUrl = new URL('../../lib/safe-url.ts', import.meta.url);
 const constantsUrl = new URL('../../constants.ts', import.meta.url);
+const homeDashboardUrl = new URL('../../components/HomeDashboard.tsx', import.meta.url);
+const projectListUrl = new URL('../../components/ProjectList.tsx', import.meta.url);
+const projectMediaTimelineUrl = new URL(
+  '../../components/ProjectMediaTimeline.tsx',
+  import.meta.url
+);
 
 test('API client includes cookies and handles unauthorized sessions centrally', async () => {
   const source = await readFile(apiClientUrl, 'utf8');
@@ -181,4 +187,23 @@ test('application branding uses the public logo endpoint before login', async ()
 
   assert.match(source, /\/branding\/logo/);
   assert.match(source, /logoUrl=\{displayLogoUrl\}/);
+});
+
+test('preview feedback keeps personal headings, a complete status ring, and custom media folders', async () => {
+  const [homeSource, projectListSource, mediaSource] = await Promise.all([
+    readFile(homeDashboardUrl, 'utf8'),
+    readFile(projectListUrl, 'utf8'),
+    readFile(projectMediaTimelineUrl, 'utf8')
+  ]);
+
+  assert.match(homeSource, />\s*我的首页\s*</);
+  assert.doesNotMatch(homeSource, /经营首页/);
+  assert.match(homeSource, /projectStatusChart\.filter\(entry => entry\.value > 0\)/);
+  assert.match(homeSource, /paddingAngle=\{projectStatusSlices\.length > 1 \? 3 : 0\}/);
+  assert.match(homeSource, /cornerRadius=\{projectStatusSlices\.length > 1 \? 8 : 0\}/);
+  assert.match(projectListSource, />\s*我的工程项目\s*</);
+  assert.doesNotMatch(projectListSource, /全员项目概览/);
+  assert.match(mediaSource, /新建影像文件夹（自定义命名）/);
+  assert.match(mediaSource, /自定义文件夹名称/);
+  assert.match(mediaSource, /placeholder=\{`建议：\$\{suggestedAlbumTitle\}`\}/);
 });

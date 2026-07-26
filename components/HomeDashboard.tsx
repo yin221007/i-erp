@@ -1006,6 +1006,8 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
     });
   };
 
+  const projectStatusSlices = model.projectStatusChart.filter(entry => entry.value > 0);
+
   return (
     <div className="min-h-full rounded-[1.5rem] bg-slate-50 text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-950 dark:text-white dark:ring-white/10">
       <div className="relative overflow-hidden rounded-[1.5rem]">
@@ -1020,7 +1022,7 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                 首页总览
               </div>
               <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl dark:text-white">
-                {model.isGlobalUser ? '经营首页' : '我的首页'}
+                我的首页
               </h1>
               <p className="mt-2 max-w-2xl text-sm font-bold leading-5 text-slate-600 dark:text-slate-400">
                 当前看板按账号权限展示。视图：
@@ -1087,8 +1089,18 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                 <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={model.projectStatusChart} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={5} onClick={(entry: any) => { const list = entry?.name === '在建' ? model.activeProjects : entry?.name === '待启动' ? model.pendingProjects : model.completedProjects; showDetails({ title: `${entry?.name || '工程'}明细`, subtitle: '点击明细可进入工程项目模块', entries: projectEntries(list), emptyText: '暂无工程' }); }}>
-                        {model.projectStatusChart.map((_, index) => (
+                      <Pie
+                        data={projectStatusSlices}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={54}
+                        outerRadius={82}
+                        paddingAngle={projectStatusSlices.length > 1 ? 3 : 0}
+                        cornerRadius={projectStatusSlices.length > 1 ? 8 : 0}
+                        stroke="none"
+                        onClick={(entry: any) => { const list = entry?.name === '在建' ? model.activeProjects : entry?.name === '待启动' ? model.pendingProjects : model.completedProjects; showDetails({ title: `${entry?.name || '工程'}明细`, subtitle: '点击明细可进入工程项目模块', entries: projectEntries(list), emptyText: '暂无工程' }); }}
+                      >
+                        {projectStatusSlices.map((_, index) => (
                           <Cell key={`project-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                         ))}
                       </Pie>

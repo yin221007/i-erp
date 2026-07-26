@@ -241,7 +241,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
               ) : (
                   <>
                     <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
-                        {isRegularUser ? '我的工程项目' : '全员项目概览'}
+                        我的工程项目
                     </h2>
                     <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-xs md:text-sm">
                         {isRegularUser ? '查阅并跟进您负责的所有工程进度' : '厨房设备工程全生命周期管控系统'}
