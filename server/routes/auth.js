@@ -62,9 +62,14 @@ export function createAuthRouter({
   router.post('/login', async (req, res, next) => {
     try {
       const username = String(req.body?.username || '').trim().toLowerCase();
-      const password = String(req.body?.password || '').trim();
+      const password = typeof req.body?.password === 'string'
+        ? req.body.password
+        : '';
       if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
+      }
+      if (username.length > 100 || password.length > 1024) {
+        return res.status(400).json({ error: 'Username or password is too long' });
       }
 
       const limiterKey = `${req.ip}:${username}`;

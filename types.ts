@@ -142,7 +142,20 @@ export type ArchiveCategory =
   | 'WinningNotice' 
   | 'SignOff'       
   | 'Training'      
+  | 'Media'
   | 'Other';        
+
+export const PROJECT_MEDIA_PHASES = [
+  '前期对接 & 设计',
+  '生产准备',
+  '进场施工',
+  '安装调试',
+  '验收交付',
+  '结算收尾'
+] as const;
+
+export type ProjectMediaPhase = typeof PROJECT_MEDIA_PHASES[number];
+export type ProjectMediaType = 'image' | 'video';
 
 export interface ArchiveItem {
   id: string;
@@ -156,6 +169,14 @@ export interface ArchiveItem {
   uploader: string;
   url?: string; 
   createdAt?: string;
+  mediaPhase?: ProjectMediaPhase;
+  capturedAt?: string;
+  mediaType?: ProjectMediaType;
+  description?: string;
+  mediaAlbumId?: string;
+  mediaAlbumTitle?: string;
+  workflowNodeId?: string;
+  workflowNodeTitle?: string;
 }
 
 export type ProductionStatus = 'Waiting' | 'InStock' | 'Shipped';

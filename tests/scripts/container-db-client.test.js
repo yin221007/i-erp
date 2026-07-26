@@ -10,7 +10,7 @@ test('deployment database checks use the backup image client', async () => {
     'utf8'
   );
 
-  assert.match(source, /docker run --rm -i --entrypoint mariadb/);
+  assert.match(source, /docker run --rm -i[\s\S]*--entrypoint mariadb/);
   assert.match(source, /IERP_BACKUP_IMAGE/);
   assert.match(source, /db_client/);
 });
@@ -33,6 +33,19 @@ test('deployment scripts do not require host MariaDB binaries', async () => {
   ]) {
     const source = await readFile(new URL(name, root), 'utf8');
     assert.doesNotMatch(source, /require_command[^\n]*mariadb/);
+  }
+});
+
+test('database passwords are never placed in MariaDB command arguments', async () => {
+  const sources = await Promise.all([
+    readFile(new URL('../../scripts/deploy-lib.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/backup.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/restore-drill.sh', import.meta.url), 'utf8')
+  ]);
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, /--password/);
+    assert.match(source, /MYSQL_PWD/);
   }
 });
 

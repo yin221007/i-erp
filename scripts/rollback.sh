@@ -62,7 +62,7 @@ restore_uploads() {
 
 start_old_stack() {
   log "Starting preserved old stack"
-  docker compose -f "$OLD_COMPOSE_FILE" up -d
+  docker compose --env-file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" up -d
   if [[ -n "${OLD_HEALTH_URL:-}" ]]; then
     wait_for_health "$OLD_HEALTH_URL" 30
   fi
@@ -71,7 +71,9 @@ start_old_stack() {
 main() {
   require_env \
     IERP_VERSION ROLLBACK_SNAPSHOT DB_HOST DB_USER DB_PASSWORD DB_NAME \
-    UPLOADS_PATH OLD_COMPOSE_FILE BACKUP_ROOT
+    UPLOADS_PATH OLD_COMPOSE_FILE OLD_ENV_FILE BACKUP_ROOT
+  [[ -f "$OLD_COMPOSE_FILE" ]] || die "Old Compose file does not exist"
+  [[ -f "$OLD_ENV_FILE" ]] || die "Old environment file does not exist"
   verify_snapshot "$ROLLBACK_SNAPSHOT"
 
   if [[ "${1:-}" == "--check-only" ]]; then
@@ -86,7 +88,7 @@ main() {
     "This will replace the production database and uploads with the named snapshot."
 
   stop_green_stack
-  docker compose -f "$OLD_COMPOSE_FILE" stop >/dev/null 2>&1 || true
+  docker compose --env-file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" stop >/dev/null 2>&1 || true
 
   quarantine_root="$BACKUP_ROOT/failed-rollbacks/$(date -u +%Y%m%dT%H%M%SZ)"
   quarantine_failed_database "$quarantine_root"

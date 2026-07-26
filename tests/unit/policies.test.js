@@ -17,6 +17,7 @@ const normalUser = {
   permission: 'ReadWrite'
 };
 const administrator = { id: 'u-1', role: 'Admin', isDefaultAdmin: true };
+const ordinaryAdministrator = { id: 'u-admin', role: 'Admin', isDefaultAdmin: false };
 
 test('unknown resources have no policy', () => {
   assert.equal(getResourcePolicy('projects'), 'scoped');
@@ -27,6 +28,35 @@ test('administrative resources reject normal-user writes', () => {
   assert.equal(canWriteResource('users', normalUser, { id: 'u-3' }), false);
   assert.equal(canWriteResource('settings', normalUser, {}), false);
   assert.equal(canWriteResource('users', administrator, { id: 'u-3' }), true);
+});
+
+test('only the default administrator can manage user accounts', () => {
+  const ordinaryUser = { id: 'u-3', role: 'User', isDefaultAdmin: false };
+  assert.equal(
+    canWriteResource('users', ordinaryAdministrator, ordinaryUser, { action: 'create' }),
+    false
+  );
+  assert.equal(
+    canWriteResource('users', administrator, ordinaryUser, { action: 'create' }),
+    true
+  );
+  assert.equal(
+    canWriteResource('users', administrator, { ...ordinaryUser, isDefaultAdmin: true }, { action: 'create' }),
+    false
+  );
+  assert.equal(
+    canWriteResource('users', administrator, administrator, { action: 'delete' }),
+    false
+  );
+  assert.equal(
+    canUpdateResource(
+      'users',
+      administrator,
+      { ...ordinaryUser, isDefaultAdmin: true },
+      ordinaryUser
+    ),
+    false
+  );
 });
 
 test('owner resources only expose the authenticated user records', () => {
@@ -86,6 +116,40 @@ test('project-linked money and production writes require the proper department a
     true
   );
   assert.equal(canWriteResource('payments', normalUser, { projectId: 'p-hidden' }, context), false);
+});
+
+test('updates require write access to both the stored and submitted project ownership', () => {
+  const context = {
+    projects: [
+      { id: 'p-mine', manager: 'Alice' },
+      { id: 'p-hidden', manager: 'Eve' }
+    ],
+    users: [
+      { nickname: 'Alice', department: '销售部' },
+      { nickname: 'Eve', department: '工程部' }
+    ]
+  };
+
+  assert.equal(
+    canUpdateResource(
+      'payments',
+      normalUser,
+      { id: 'pay-hidden', projectId: 'p-mine', managerName: 'Alice' },
+      { id: 'pay-hidden', projectId: 'p-hidden', managerName: 'Eve' },
+      context
+    ),
+    false
+  );
+  assert.equal(
+    canUpdateResource(
+      'payments',
+      normalUser,
+      { id: 'pay-mine', projectId: 'p-mine', managerName: 'Alice' },
+      { id: 'pay-mine', projectId: 'p-mine', managerName: 'Alice' },
+      context
+    ),
+    true
+  );
 });
 
 test('user resources never expose password or private credentials', () => {

@@ -32,6 +32,10 @@ function isAdministrator(user) {
   return user?.isDefaultAdmin === true || user?.role === 'Admin';
 }
 
+function isDefaultAdministrator(user) {
+  return user?.isDefaultAdmin === true;
+}
+
 function isExecutive(user) {
   return EXECUTIVE_DEPARTMENTS.has(user?.department || '');
 }
@@ -296,6 +300,14 @@ export function getResourcePolicy(resource) {
 export function canWriteResource(resource, user, record, context = {}) {
   const definition = getResourceDefinition(resource);
   if (!definition || !user) return false;
+  if (resource === 'users') {
+    if (!isDefaultAdministrator(user)) return false;
+    if (context?.action === 'create') return record?.isDefaultAdmin !== true;
+    if (context?.action === 'delete') {
+      return record?.isDefaultAdmin !== true && record?.id !== user.id;
+    }
+    return true;
+  }
   if (isAdministrator(user)) return true;
   if (definition.write === 'admin') return false;
   if (definition.write === 'owner') return isOwnedRecord(resource, user, record);
@@ -357,11 +369,16 @@ export function canUpdateResource(resource, user, nextRecord, previousRecord, co
   if (resource === 'approvals') {
     return canUpdateApprovalRecord(user, nextRecord, previousRecord);
   }
-  if (OWNER_SCOPED_RESOURCES.has(resource)) {
-    if (previousRecord && !sameJson(previousRecord.creatorId ?? null, nextRecord?.creatorId ?? null)) return false;
-    return canWriteResource(resource, user, previousRecord || nextRecord, { ...context, action: 'update' });
+  if (!previousRecord) return false;
+  if (resource === 'users') {
+    if (previousRecord.isDefaultAdmin !== nextRecord?.isDefaultAdmin) return false;
+    if (previousRecord.isDefaultAdmin === true && nextRecord?.role !== 'Admin') return false;
   }
-  return canWriteResource(resource, user, nextRecord, { ...context, action: 'update' });
+  if (OWNER_SCOPED_RESOURCES.has(resource)) {
+    if (!sameJson(previousRecord.creatorId ?? null, nextRecord?.creatorId ?? null)) return false;
+  }
+  return canWriteResource(resource, user, previousRecord, { ...context, action: 'update' }) &&
+    canWriteResource(resource, user, nextRecord, { ...context, action: 'update' });
 }
 
 export function filterReadableRecords(resource, user, records, context = {}) {

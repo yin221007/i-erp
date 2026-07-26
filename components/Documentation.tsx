@@ -4,6 +4,7 @@ import { DocItem, User } from '../types';
 import { Search, FileText, Download, Eye, BookOpen, Plus, X, Upload, Save, File as FileIcon, Trash2, AlertCircle, Filter, Edit3, Globe, Layers, CheckCircle2, Link as LinkIcon, FileCode } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
 import { API_URL, apiFetch } from '../lib/api';
+import { normalizeExternalUrl, normalizeSafeUrl } from '../lib/safe-url';
 
 interface DocumentationProps {
   docs: DocItem[];
@@ -127,6 +128,8 @@ const Documentation: React.FC<DocumentationProps> = ({ docs, onAddDoc, onUpdateD
         setUploadData({ title: '', category: 'Standard', file: null, type: 'FILE', externalUrl: '' });
       } else if (uploadData.type === 'URL') {
           if (!uploadData.title || !uploadData.externalUrl) return alert("请填写完整标题和外部链接地址");
+          const externalUrl = normalizeExternalUrl(uploadData.externalUrl);
+          if (!externalUrl) return alert("外部链接仅支持 http:// 或 https:// 地址");
           const newDoc: DocItem = {
               id: Math.random().toString(36).substr(2, 9),
               title: uploadData.title,
@@ -134,7 +137,7 @@ const Documentation: React.FC<DocumentationProps> = ({ docs, onAddDoc, onUpdateD
               fileType: 'LINK',
               size: '-',
               updatedAt: new Date().toISOString(),
-              url: uploadData.externalUrl
+              url: externalUrl
           };
           onAddDoc(newDoc);
           setIsUploadModalOpen(false);
@@ -306,10 +309,10 @@ const Documentation: React.FC<DocumentationProps> = ({ docs, onAddDoc, onUpdateD
                     <div className="col-span-12 md:col-span-2 flex items-center justify-end md:justify-center gap-3 w-full border-t md:border-t-0 border-slate-100 dark:border-slate-700 pt-4 md:pt-0 transition-colors" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => { setPreviewDoc(doc); if(doc.fileType === 'WIKI') { setWikiContent(doc.content || ''); setWikiTitle(doc.title); setIsEditingWiki(false); } }} className="p-2.5 hover:bg-white dark:hover:bg-slate-600 rounded-xl text-slate-400 hover:text-primary-600 transition-all shadow-sm active:scale-90" title="查阅内容"><Eye className="w-5 h-5" /></button>
                         {doc.fileType !== 'WIKI' && doc.fileType !== 'LINK' && (
-                            <a href={doc.url || '#'} download={doc.title} target="_blank" rel="noreferrer" onClick={(e) => !doc.url && e.preventDefault()} className={`p-2.5 rounded-xl transition-all shadow-sm ${doc.url ? 'hover:bg-white dark:hover:bg-slate-600 text-primary-600 dark:text-primary-400' : 'text-slate-200 dark:text-slate-700 cursor-not-allowed'}`} title={doc.url ? "立即下载存档" : "文件失效"}><Download className="w-5 h-5" /></a>
+                            <a href={normalizeSafeUrl(doc.url) || '#'} download={doc.title} target="_blank" rel="noreferrer" onClick={(e) => !normalizeSafeUrl(doc.url) && e.preventDefault()} className={`p-2.5 rounded-xl transition-all shadow-sm ${normalizeSafeUrl(doc.url) ? 'hover:bg-white dark:hover:bg-slate-600 text-primary-600 dark:text-primary-400' : 'text-slate-200 dark:text-slate-700 cursor-not-allowed'}`} title={normalizeSafeUrl(doc.url) ? "立即下载存档" : "文件失效"}><Download className="w-5 h-5" /></a>
                         )}
                         {doc.fileType === 'LINK' && (
-                            <a href={doc.url} target="_blank" rel="noreferrer" className="p-2.5 hover:bg-white dark:hover:bg-slate-600 rounded-xl text-blue-500 transition-all shadow-sm active:scale-90" title="在外部浏览器打开"><Globe className="w-5 h-5" /></a>
+                            <a href={normalizeExternalUrl(doc.url) || '#'} target="_blank" rel="noreferrer" onClick={(e) => !normalizeExternalUrl(doc.url) && e.preventDefault()} className="p-2.5 hover:bg-white dark:hover:bg-slate-600 rounded-xl text-blue-500 transition-all shadow-sm active:scale-90" title="在外部浏览器打开"><Globe className="w-5 h-5" /></a>
                         )}
                         {currentUser.role === 'Admin' && (<button onClick={(e) => handleDelete(e, doc.id, doc.title)} className="p-2.5 hover:bg-white dark:hover:bg-slate-600 rounded-xl text-slate-200 hover:text-red-500 transition-all shadow-sm active:scale-90" title="删除知识项"><Trash2 className="w-5 h-5" /></button>)}
                     </div>
@@ -418,9 +421,9 @@ const Documentation: React.FC<DocumentationProps> = ({ docs, onAddDoc, onUpdateD
                                   )
                               )
                           ) : previewDoc.fileType === 'LINK' ? (
-                              <a href={previewDoc.url} target="_blank" rel="noreferrer" className="px-10 py-4 bg-blue-600 text-white text-xs rounded-2xl font-black shadow-2xl shadow-blue-500/30 flex items-center gap-2 hover:bg-blue-700 active:scale-95 transition-all uppercase tracking-widest border-2 border-white/20"><Globe className="w-5 h-5" /> 浏览器外部查阅</a>
+                              <a href={normalizeExternalUrl(previewDoc.url) || '#'} target="_blank" rel="noreferrer" onClick={(e) => !normalizeExternalUrl(previewDoc.url) && e.preventDefault()} className="px-10 py-4 bg-blue-600 text-white text-xs rounded-2xl font-black shadow-2xl shadow-blue-500/30 flex items-center gap-2 hover:bg-blue-700 active:scale-95 transition-all uppercase tracking-widest border-2 border-white/20"><Globe className="w-5 h-5" /> 浏览器外部查阅</a>
                           ) : (
-                              <a href={previewDoc.url || '#'} download={previewDoc.title} target="_blank" rel="noreferrer" onClick={(e) => !previewDoc.url && e.preventDefault()} className={`px-10 py-4 text-xs rounded-2xl font-black flex items-center gap-2 transition-all uppercase tracking-widest border-2 border-transparent ${previewDoc.url ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-2xl shadow-primary-500/20 hover:border-white/20' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}`}><Download className="w-5 h-5" /> 下载离线存档</a>
+                              <a href={normalizeSafeUrl(previewDoc.url) || '#'} download={previewDoc.title} target="_blank" rel="noreferrer" onClick={(e) => !normalizeSafeUrl(previewDoc.url) && e.preventDefault()} className={`px-10 py-4 text-xs rounded-2xl font-black flex items-center gap-2 transition-all uppercase tracking-widest border-2 border-transparent ${normalizeSafeUrl(previewDoc.url) ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-2xl shadow-primary-500/20 hover:border-white/20' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'}`}><Download className="w-5 h-5" /> 下载离线存档</a>
                           )}
                           <button onClick={() => { setPreviewDoc(null); setIsEditingWiki(false); }} className="p-4 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full text-slate-500 transition-all hover:rotate-90"><X className="w-8 h-8" /></button>
                       </div>
@@ -457,23 +460,26 @@ const Documentation: React.FC<DocumentationProps> = ({ docs, onAddDoc, onUpdateD
                                   </div>
                               </div>
                           )
-                      ) : (previewDoc.fileType === 'LINK' || previewDoc.fileType === 'HTML') ? (
-                           <div className="flex-1 bg-white flex flex-col transition-all overflow-hidden relative">
-                              {/* 核心改动：内嵌网页预览容器 */}
-                              <iframe 
-                                src={previewDoc.url} 
-                                className="w-full h-full border-none shadow-2xl bg-white" 
-                                title="iERP Web Content Preview Container" 
-                              />
-                              <div className="absolute top-4 right-10 pointer-events-none opacity-20 hidden md:block">
-                                 <p className="text-[40px] font-black text-slate-900 uppercase tracking-[0.5em] select-none">CONTENT VIEW</p>
+                      ) : previewDoc.fileType === 'LINK' ? (
+                           <div className="flex-1 bg-white dark:bg-slate-950 flex items-center justify-center p-10 text-center">
+                              <div>
+                                <Globe className="w-20 h-20 mx-auto text-blue-500 mb-6" />
+                                <p className="text-xl font-black text-slate-800 dark:text-white">外部网页不在系统内嵌加载</p>
+                                <p className="mt-3 text-sm text-slate-500">请使用右上角“浏览器外部查阅”，避免不可信网页冒充系统界面。</p>
                               </div>
                            </div>
+                      ) : previewDoc.fileType === 'HTML' ? (
+                           <iframe
+                             src={normalizeSafeUrl(previewDoc.url)}
+                             sandbox=""
+                             className="w-full h-full border-none shadow-2xl bg-white"
+                             title="Sandboxed HTML document preview"
+                           />
                       ) : (
                         <div className="flex-1 flex items-center justify-center p-10">
                             {previewDoc.url ? (
-                                previewDoc.fileType === 'PDF' ? (<iframe src={previewDoc.url} className="w-full h-full rounded-[2.5rem] bg-white shadow-2xl transition-all border-none" title="Standard Document Preview" />) : 
-                                ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP'].includes(previewDoc.fileType) ? (<div className="relative group max-w-full max-h-full"><img src={previewDoc.url} alt="Knowledge Asset Preview" className="max-w-full max-h-full object-contain shadow-2xl rounded-[2.5rem] animate-in fade-in zoom-in-95 duration-500" /></div>) : 
+                                previewDoc.fileType === 'PDF' ? (<iframe src={normalizeSafeUrl(previewDoc.url)} className="w-full h-full rounded-[2.5rem] bg-white shadow-2xl transition-all border-none" title="Standard Document Preview" />) :
+                                ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP'].includes(previewDoc.fileType) ? (<div className="relative group max-w-full max-h-full"><img src={normalizeSafeUrl(previewDoc.url)} alt="Knowledge Asset Preview" className="max-w-full max-h-full object-contain shadow-2xl rounded-[2.5rem] animate-in fade-in zoom-in-95 duration-500" /></div>) :
                                 (<div className="text-center p-24 animate-in slide-in-from-bottom-10 transition-all"><div className="bg-white dark:bg-slate-800 w-48 h-48 rounded-[3.5rem] shadow-2xl flex items-center justify-center mx-auto mb-10 transition-all transform rotate-6 border-4 border-slate-100 dark:border-slate-700 group-hover:rotate-0">{getFileIcon(previewDoc.fileType)}</div><p className="text-slate-800 dark:text-white font-black text-3xl transition-colors uppercase tracking-[0.1em]">预览引擎不支持此格式</p><p className="text-slate-400 mt-5 font-bold text-lg">请点击右上方按钮下载该归档至本地终端查阅</p></div>)
                             ) : (<div className="text-center p-24 transition-all opacity-20"><AlertCircle className="w-24 h-24 mx-auto text-slate-400 mb-8 transition-colors" /><p className="text-slate-500 font-black uppercase tracking-[0.5em] text-2xl">知识资产链接暂时失效</p></div>)}
                         </div>

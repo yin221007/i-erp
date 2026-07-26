@@ -11,11 +11,20 @@ const cookie = `ierp_session=${token}`;
 const origin = 'https://erp.example.test';
 
 class UploadTestPool {
-  constructor(logoUrl = '') {
+  constructor(logoUrl = '', { user, resources } = {}) {
     this.logoUrl = logoUrl;
+    this.user = user || {
+      id: 'u-1',
+      nickname: 'admin',
+      department: '总经办',
+      role: 'Admin',
+      permission: 'ReadWrite',
+      isDefaultAdmin: true
+    };
+    this.resources = resources || {};
   }
 
-  async query(sql) {
+  async query(sql, parameters = []) {
     const normalized = sql.replace(/\s+/g, ' ').trim();
     if (normalized.startsWith('SELECT json_data FROM settings WHERE id = ?')) {
       return [this.logoUrl ? [{
@@ -27,16 +36,29 @@ class UploadTestPool {
         session_id: 'session-1',
         expires_at: new Date(Date.now() + 60_000),
         absolute_expires_at: new Date(Date.now() + 120_000),
-        json_data: JSON.stringify({
-          id: 'u-1',
-          nickname: 'admin',
-          role: 'Admin',
-          isDefaultAdmin: true
-        })
+          json_data: JSON.stringify(this.user)
       }], []];
     }
     if (normalized.startsWith('UPDATE auth_sessions SET last_seen_at')) {
       return [{ affectedRows: 1 }, []];
+    }
+    const referenceMatch = normalized.match(
+      /^SELECT json_data FROM `([a-z_]+)` WHERE JSON_SEARCH\(json_data, 'one', \?\) IS NOT NULL$/
+    );
+    if (referenceMatch) {
+      const records = this.resources[referenceMatch[1]] || [];
+      return [records
+        .filter(record => JSON.stringify(record).includes(parameters[0]))
+        .map(record => ({ json_data: JSON.stringify(record) })), []];
+    }
+    const tableMatch = normalized.match(
+      /^SELECT json_data FROM `([a-z_]+)` ORDER BY created_at ASC$/
+    );
+    if (tableMatch) {
+      const records = tableMatch[1] === 'users'
+        ? [this.user, ...(this.resources.users || [])]
+        : this.resources[tableMatch[1]] || [];
+      return [records.map(record => ({ json_data: JSON.stringify(record) })), []];
     }
     throw new Error(`Unexpected SQL in upload test: ${normalized}`);
   }
@@ -44,7 +66,7 @@ class UploadTestPool {
 
 async function withUploadApp(
   callback,
-  { maxFileSize = 100, logoUrl = '' } = {}
+  { maxFileSize = 100, logoUrl = '', user, resources } = {}
 ) {
   const uploadDirectory = await mkdtemp(path.join(tmpdir(), 'ierp-upload-'));
   const config = {
@@ -56,10 +78,8 @@ async function withUploadApp(
     }
   };
   try {
-    await callback(
-      createApp({ pool: new UploadTestPool(logoUrl), config }),
-      uploadDirectory
-    );
+    const pool = new UploadTestPool(logoUrl, { user, resources });
+    await callback(createApp({ pool, config }), uploadDirectory, pool);
   } finally {
     await rm(uploadDirectory, { recursive: true, force: true });
   }
@@ -75,6 +95,86 @@ test('anonymous uploads are rejected', async () => {
         contentType: 'text/plain'
       })
       .expect(401);
+  });
+});
+
+test('read-only users cannot create raw uploads', async () => {
+  await withUploadApp(async app => {
+    await request(app)
+      .post('/upload')
+      .set('Cookie', cookie)
+      .set('Origin', origin)
+      .attach('file', Buffer.from('hello'), {
+        filename: 'note.txt',
+        contentType: 'text/plain'
+      })
+      .expect(403);
+  }, {
+    user: {
+      id: 'u-read',
+      nickname: 'reader',
+      department: '销售部',
+      role: 'User',
+      permission: 'Read',
+      isDefaultAdmin: false
+    }
+  });
+});
+
+test('authenticated clients can read the effective media upload limit', async () => {
+  await withUploadApp(async app => {
+    await request(app).get('/upload/config').expect(401);
+
+    const response = await request(app)
+      .get('/upload/config')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    assert.equal(response.body.maxFileSize, 321);
+    assert.deepEqual(response.body.mediaExtensions, {
+      image: ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+      video: ['mp4', 'mov', 'webm']
+    });
+  }, { maxFileSize: 321 });
+});
+
+test('stored files require visibility of the record that references the URL', async () => {
+  const visibleFilename = '1769674116177-400514667.pdf';
+  const hiddenFilename = '1769674116178-400514668.pdf';
+  const visibleUrl = `/api/uploads/${visibleFilename}`;
+  const hiddenUrl = `/api/uploads/${hiddenFilename}`;
+  await withUploadApp(async (app, uploadDirectory) => {
+    await writeFile(path.join(uploadDirectory, visibleFilename), 'visible');
+    await writeFile(path.join(uploadDirectory, hiddenFilename), 'hidden');
+
+    await request(app)
+      .get(`/uploads/${visibleFilename}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    await request(app)
+      .get(`/uploads/${hiddenFilename}`)
+      .set('Cookie', cookie)
+      .expect(404);
+  }, {
+    user: {
+      id: 'u-1',
+      nickname: 'Alice',
+      department: '销售部',
+      role: 'User',
+      permission: 'ReadWrite',
+      isDefaultAdmin: false
+    },
+    resources: {
+      users: [{ id: 'u-2', nickname: 'Bob', department: '工程部' }],
+      projects: [
+        { id: 'p-visible', name: 'Visible', manager: 'Alice' },
+        { id: 'p-hidden', name: 'Hidden', manager: 'Bob' }
+      ],
+      archives: [
+        { id: 'a-visible', projectId: 'p-visible', projectName: 'Visible', url: visibleUrl },
+        { id: 'a-hidden', projectId: 'p-hidden', projectName: 'Hidden', url: hiddenUrl }
+      ]
+    }
   });
 });
 
@@ -183,6 +283,36 @@ test('stored names are generated and preview inline by default', async () => {
 
     assert.match(downloadResponse.headers['content-disposition'], /^attachment;/);
     assert.equal(downloadResponse.text, 'hello');
+  });
+});
+
+test('an unreferenced upload can be removed only with its cleanup token', async () => {
+  await withUploadApp(async (app, uploadDirectory) => {
+    const uploadResponse = await request(app)
+      .post('/upload')
+      .set('Cookie', cookie)
+      .set('Origin', origin)
+      .attach('file', Buffer.from('temporary'), {
+        filename: 'temporary.txt',
+        contentType: 'text/plain'
+      })
+      .expect(200);
+
+    await request(app)
+      .delete(`/uploads/${uploadResponse.body.filename}`)
+      .set('Cookie', cookie)
+      .set('Origin', origin)
+      .set('X-Upload-Cleanup-Token', 'invalid')
+      .expect(404);
+    assert.deepEqual(await readdir(uploadDirectory), [uploadResponse.body.filename]);
+
+    await request(app)
+      .delete(`/uploads/${uploadResponse.body.filename}`)
+      .set('Cookie', cookie)
+      .set('Origin', origin)
+      .set('X-Upload-Cleanup-Token', uploadResponse.body.cleanupToken)
+      .expect(204);
+    assert.deepEqual(await readdir(uploadDirectory), []);
   });
 });
 

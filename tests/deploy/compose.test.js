@@ -95,6 +95,34 @@ test('nginx exposes live and backend readiness checks with the upload limit', as
   assert.doesNotMatch(nginx, /51200M/);
 });
 
+test('nginx refreshes the app entry while caching hashed assets immutably', async () => {
+  const nginx = await readFile(new URL('nginx.conf', root), 'utf8');
+
+  assert.match(nginx, /location \/assets\/ \{/);
+  assert.match(nginx, /Cache-Control "public, max-age=31536000, immutable"/);
+  assert.match(nginx, /Cache-Control "no-store, no-cache, must-revalidate"/);
+  assert.match(nginx, /X-Content-Type-Options "nosniff"/);
+  assert.match(nginx, /X-Frame-Options "SAMEORIGIN"/);
+  assert.match(nginx, /Referrer-Policy "strict-origin-when-cross-origin"/);
+});
+
+test('application backends run as the Synology deployment identity', async () => {
+  const [baseSource, blue, green, dockerfile] = await Promise.all([
+    readFile(new URL('docker-compose.yml', root), 'utf8'),
+    compose('docker-compose.blue.yml'),
+    compose('docker-compose.green.yml'),
+    readFile(new URL('Dockerfile.backend', root), 'utf8')
+  ]);
+  const base = parse(baseSource);
+
+  for (const backend of [base.services.backend, blue.services.backend, green.services.backend]) {
+    assert.match(backend.user, /NAS_UID/);
+    assert.match(backend.user, /NAS_GID/);
+  }
+  assert.match(dockerfile, /USER node/);
+  assert.doesNotMatch(dockerfile, /chmod 777/);
+});
+
 test('the base stack contains no production host literals and bounds backups', async () => {
   const source = await readFile(new URL('docker-compose.yml', root), 'utf8');
   const stack = parse(source);

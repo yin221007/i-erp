@@ -1,11 +1,28 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import multer from 'multer';
 import { requireAuth } from '../auth/middleware.js';
+import { filterReadableRecords } from '../policies.js';
 
 export const DEFAULT_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+const FILE_REFERENCE_RESOURCES = [
+  'projects',
+  'equipment',
+  'docs',
+  'archives',
+  'users',
+  'settings',
+  'approvals',
+  'messages',
+  'channels',
+  'announcements',
+  'ai_messages',
+  'worklogs'
+];
 
 const allowedTypes = new Map([
   ['.txt', new Set(['text/plain'])],
@@ -82,6 +99,63 @@ function isStoredFileName(filename) {
     (isUuid || isHistorical);
 }
 
+function parseRecord(value) {
+  return typeof value === 'string' ? JSON.parse(value) : structuredClone(value);
+}
+
+function isAdministrator(user) {
+  return user?.isDefaultAdmin === true || user?.role === 'Admin';
+}
+
+function canCreateUpload(user) {
+  return isAdministrator(user) || user?.permission === 'ReadWrite';
+}
+
+function createCleanupToken(sessionToken, filename) {
+  return createHmac('sha256', sessionToken).update(filename).digest('base64url');
+}
+
+function isValidCleanupToken(sessionToken, filename, suppliedToken) {
+  if (!sessionToken || typeof suppliedToken !== 'string') return false;
+  const expected = Buffer.from(createCleanupToken(sessionToken, filename));
+  const supplied = Buffer.from(suppliedToken);
+  return expected.length === supplied.length && timingSafeEqual(expected, supplied);
+}
+
+async function readJsonTable(pool, resource) {
+  const [rows] = await pool.query(
+    `SELECT json_data FROM \`${resource}\` ORDER BY created_at ASC`
+  );
+  return rows.map(row => parseRecord(row.json_data));
+}
+
+async function findUploadReferences(pool, url) {
+  const matches = await Promise.all(FILE_REFERENCE_RESOURCES.map(async resource => {
+    const [rows] = await pool.query(
+      `SELECT json_data FROM \`${resource}\` WHERE JSON_SEARCH(json_data, 'one', ?) IS NOT NULL`,
+      [url]
+    );
+    return rows.map(row => ({ resource, record: parseRecord(row.json_data) }));
+  }));
+  return matches.flat();
+}
+
+async function canReadUpload(pool, user, url) {
+  if (isAdministrator(user)) return true;
+  const references = await findUploadReferences(pool, url);
+  if (references.length === 0) return false;
+
+  const [users, projects, channels] = await Promise.all([
+    readJsonTable(pool, 'users'),
+    readJsonTable(pool, 'projects'),
+    readJsonTable(pool, 'channels')
+  ]);
+  const context = { users, projects, channels };
+  return references.some(({ resource, record }) =>
+    filterReadableRecords(resource, user, [record], context).length === 1
+  );
+}
+
 export function createUploadsRouter({
   directory,
   maxFileSize = DEFAULT_UPLOAD_MAX_BYTES,
@@ -116,6 +190,16 @@ export function createUploadsRouter({
   });
 
   const router = express.Router();
+
+  router.get('/upload/config', requireAuth, (_req, res) => {
+    res.json({
+      maxFileSize,
+      mediaExtensions: {
+        image: ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+        video: ['mp4', 'mov', 'webm']
+      }
+    });
+  });
 
   router.get('/branding/logo', async (_req, res, next) => {
     if (!pool) return res.status(404).json({ error: 'Logo not found' });
@@ -163,6 +247,9 @@ export function createUploadsRouter({
   });
 
   router.post('/upload', requireAuth, (req, res) => {
+    if (!canCreateUpload(req.authUser)) {
+      return res.status(403).json({ error: 'Write access denied' });
+    }
     upload.single('file')(req, res, error => {
       if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({ error: 'File exceeds upload limit' });
@@ -177,15 +264,25 @@ export function createUploadsRouter({
       }
       return res.json({
         url: `/api/uploads/${req.file.filename}`,
-        filename: req.file.filename
+        filename: req.file.filename,
+        cleanupToken: createCleanupToken(req.sessionToken, req.file.filename)
       });
     });
   });
 
-  router.get('/uploads/:filename', requireAuth, (req, res, next) => {
+  router.get('/uploads/:filename', requireAuth, async (req, res, next) => {
     const { filename } = req.params;
     if (!isStoredFileName(filename)) {
       return res.status(404).json({ error: 'File not found' });
+    }
+
+    try {
+      const url = `/api/uploads/${filename}`;
+      if (!(await canReadUpload(pool, req.authUser, url))) {
+        return res.status(404).json({ error: 'File not found' });
+      }
+    } catch (error) {
+      return next(error);
     }
 
     res.set('X-Content-Type-Options', 'nosniff');
@@ -204,6 +301,35 @@ export function createUploadsRouter({
 
     res.set('Content-Disposition', `inline; filename="${filename}"`);
     return res.sendFile(filePath, handleFileError);
+  });
+
+  router.delete('/uploads/:filename', requireAuth, async (req, res, next) => {
+    const { filename } = req.params;
+    if (!canCreateUpload(req.authUser)) {
+      return res.status(403).json({ error: 'Write access denied' });
+    }
+    if (
+      !isStoredFileName(filename) ||
+      !isValidCleanupToken(
+        req.sessionToken,
+        filename,
+        req.get('x-upload-cleanup-token')
+      )
+    ) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    try {
+      const references = await findUploadReferences(pool, `/api/uploads/${filename}`);
+      if (references.length > 0) {
+        return res.status(409).json({ error: 'File is already in use' });
+      }
+      await unlink(path.join(directory, filename));
+      return res.status(204).end();
+    } catch (error) {
+      if (error?.code === 'ENOENT') return res.status(204).end();
+      return next(error);
+    }
   });
 
   return router;

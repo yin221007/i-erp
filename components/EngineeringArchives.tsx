@@ -1,13 +1,13 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { ArchiveItem, ArchiveCategory, Project, User } from '../types';
-import { Search, FileText, FileCode, FileSpreadsheet, FileImage, Paperclip, FolderOpen, Eye, Download, X, Upload, Save, File as FileIcon, Trash2, ArrowUp, ArrowDown, ArrowUpDown, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Search, FileText, FileCode, FileSpreadsheet, FileImage, FileVideo, Paperclip, FolderOpen, Eye, Download, X, Upload, Save, File as FileIcon, Trash2, ArrowUp, ArrowDown, ArrowUpDown, AlertCircle, ArrowLeft } from 'lucide-react';
 import { formatBeijingTime } from '../constants';
 import { API_URL, apiFetch } from '../lib/api';
 
 interface EngineeringArchivesProps {
   archives: ArchiveItem[];
   projects: Project[];
-  onAddArchive: (archive: ArchiveItem) => void;
+  onAddArchive: (archive: ArchiveItem) => boolean | Promise<boolean>;
   onDeleteArchive: (id: string) => void;
   onUpdateArchive: (archive: ArchiveItem) => void;
   currentUser: User;
@@ -43,7 +43,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 分类列表：与 TaskDetailModal 保持严格同步及排序一致
+  // 常规附件分类与任务节点保持一致；过程影像只在工程详情中创建，在此统一检索。
   const categories: { id: ArchiveCategory | 'All'; label: string }[] = [
     { id: 'All', label: '全部工程资料' },
     { id: 'Drawing', label: '设计图纸' },
@@ -59,6 +59,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
     { id: 'Invoice', label: '财务发票' },
     { id: 'WinningNotice', label: '中标通知书' },
     { id: 'Training', label: '培训记录' },
+    { id: 'Media', label: '过程影像' },
     { id: 'Other', label: '其他附件' },
   ];
 
@@ -68,7 +69,9 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
     return archives.filter(item => 
       (activeCategory === 'All' || item.category === activeCategory) &&
       (activeProjectId === 'All' || item.projectId === activeProjectId || item.projectName === activeProjectId || item.projectName === projects.find(project => project.id === activeProjectId)?.name) &&
-      (item.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       (item.mediaAlbumTitle || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+       (item.workflowNodeTitle || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
        item.projectName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [archives, activeCategory, activeProjectId, projects, searchTerm]);
@@ -90,7 +93,10 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
   const archiveProjectGroups = useMemo(() => {
     const baseArchives = archives.filter(item =>
       (activeCategory === 'All' || item.category === activeCategory) &&
-      (item.title.toLowerCase().includes(searchTerm.toLowerCase()) || item.projectName.toLowerCase().includes(searchTerm.toLowerCase()))
+      (item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       (item.mediaAlbumTitle || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+       (item.workflowNodeTitle || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+       item.projectName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
     const groups = new Map<string, { id: string; name: string; count: number; latest: string; categories: Set<ArchiveCategory> }>();
     baseArchives.forEach(item => {
@@ -121,7 +127,8 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
       case 'PDF': return <FileText className="w-5 h-5 text-red-500" />;
       case 'XLSX': return <FileSpreadsheet className="w-5 h-5 text-emerald-600" />;
       case 'DWG': return <FileCode className="w-5 h-5 text-primary-600" />;
-      case 'JPG': case 'PNG': return <FileImage className="w-5 h-5 text-purple-500" />;
+      case 'JPG': case 'JPEG': case 'PNG': case 'GIF': case 'WEBP': return <FileImage className="w-5 h-5 text-purple-500" />;
+      case 'MP4': case 'MOV': case 'WEBM': return <FileVideo className="w-5 h-5 text-cyan-600" />;
       default: return <Paperclip className="w-5 h-5 text-slate-400" />;
     }
   };
@@ -133,6 +140,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
       case 'Invoice': return 'bg-orange-50 text-orange-700 border-orange-100';
       case 'SignOff': return 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/30';
       case 'AuditMaterial': return 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/30';
+      case 'Media': return 'bg-cyan-50 text-cyan-700 border-cyan-100 dark:bg-cyan-900/30 dark:text-cyan-300 dark:border-cyan-800';
       default: return 'bg-slate-50 text-slate-500 border-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
     }
   };
@@ -140,6 +148,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
   const handleUploadSave = async () => {
       if (!uploadData.title || !uploadData.projectId || !uploadData.file) return alert("请填写完整归档信息");
       setIsUploading(true);
+      let uploadedFile: { filename: string; cleanupToken: string } | null = null;
       try {
         const ext = uploadData.file.name.split('.').pop()?.toUpperCase() || 'FILE';
         const sizeStr = (uploadData.file.size / 1024).toFixed(1) + ' KB';
@@ -148,6 +157,10 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
         const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: formData });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
+        uploadedFile = {
+          filename: fileData.filename,
+          cleanupToken: fileData.cleanupToken
+        };
         const newArchive: ArchiveItem = { 
             id: Math.random().toString(36).substr(2, 9), 
             title: uploadData.title, 
@@ -161,10 +174,19 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
             url: fileData.url,
             createdAt: new Date().toISOString()
         };
-        onAddArchive(newArchive);
+        const saved = await onAddArchive(newArchive);
+        if (!saved) throw new Error('Archive metadata save failed');
         setIsUploadModalOpen(false);
         setUploadData({ title: '', category: 'Drawing', projectId: '', file: null });
-      } catch (error) { alert("服务器同步异常"); } finally { setIsUploading(false); }
+      } catch (error) {
+        if (uploadedFile?.filename && uploadedFile.cleanupToken) {
+          await apiFetch(`${API_URL}/uploads/${uploadedFile.filename}`, {
+            method: 'DELETE',
+            headers: { 'X-Upload-Cleanup-Token': uploadedFile.cleanupToken }
+          }).catch(() => undefined);
+        }
+        alert("服务器同步异常，档案未保存");
+      } finally { setIsUploading(false); }
   };
 
   const handleExportCSV = () => {
@@ -286,7 +308,11 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
                         <div className="col-span-12 md:col-span-5 flex items-center gap-4 w-full pl-2">
                             <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-2xl border border-slate-100 dark:border-slate-600 shadow-sm transition-transform group-hover:scale-110">{getFileIcon(item.fileType)}</div>
                             <div className="min-w-0 flex-1">
-                                <h4 className="text-sm font-black text-slate-800 dark:text-white truncate group-hover:text-primary-600 transition-colors">{item.title}</h4>
+                                <h4 className="text-sm font-black text-slate-800 dark:text-white truncate group-hover:text-primary-600 transition-colors">
+                                  {item.category === 'Media' && item.mediaAlbumTitle
+                                    ? `${item.mediaAlbumTitle} / ${item.title}`
+                                    : item.title}
+                                </h4>
                                 <p className="md:hidden text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tighter truncate">{item.projectName}</p>
                             </div>
                         </div>
@@ -318,7 +344,7 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
                       </div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">文件档案名称 *</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-3.5 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={uploadData.title} onChange={e => setUploadData({...uploadData, title: e.target.value})} placeholder="输入存档正式显示名称" /></div>
                       <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">资料类别</label><select className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3.5 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={uploadData.category} onChange={e => setUploadData({...uploadData, category: e.target.value as any})}>{categories.filter(c => c.id !== 'All').map(c => (<option key={c.id} value={c.id}>{c.label}</option>))}</select></div>
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">资料类别</label><select className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3.5 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={uploadData.category} onChange={e => setUploadData({...uploadData, category: e.target.value as any})}>{categories.filter(c => c.id !== 'All' && c.id !== 'Media').map(c => (<option key={c.id} value={c.id}>{c.label}</option>))}</select></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">关联业务工程</label><select className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3.5 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={uploadData.projectId} onChange={e => setUploadData({...uploadData, projectId: e.target.value})}><option value="">选择项目...</option>{projects.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}</select></div>
                       </div>
                   </div>
@@ -343,7 +369,8 @@ const EngineeringArchives: React.FC<EngineeringArchivesProps> = ({ archives, pro
                   <div className="flex-1 bg-slate-100 dark:bg-slate-900 flex items-center justify-center p-8 transition-all">
                       {previewItem.url ? (
                           previewItem.fileType === 'PDF' ? (<iframe src={previewItem.url} className="w-full h-full rounded-3xl bg-white shadow-2xl border-none transition-all" title="Archive Preview" />) : 
-                          ['JPG', 'JPEG', 'PNG', 'GIF'].includes(previewItem.fileType) ? (<img src={previewItem.url} alt="Preview" className="max-w-full max-h-full object-contain shadow-2xl rounded-3xl animate-in fade-in transition-all" />) : 
+                          ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP'].includes(previewItem.fileType) ? (<img src={previewItem.url} alt="Preview" className="max-w-full max-h-full object-contain shadow-2xl rounded-3xl animate-in fade-in transition-all" />) :
+                          ['MP4', 'MOV', 'WEBM'].includes(previewItem.fileType) ? (<video src={previewItem.url} controls playsInline preload="metadata" className="max-w-full max-h-full rounded-3xl bg-black shadow-2xl">当前浏览器无法播放该视频，请下载后查看。</video>) :
                           (<div className="text-center p-20 transition-all"><div className="bg-white dark:bg-slate-800 w-40 h-40 rounded-[3rem] shadow-2xl flex items-center justify-center mx-auto mb-8 transition-all transform rotate-3"><Paperclip className="w-16 h-16 text-slate-200" /></div><p className="text-slate-800 dark:text-white font-black text-2xl transition-colors uppercase tracking-widest">格式暂不支持在线预览</p><p className="text-slate-400 mt-4 font-bold text-sm">请点击右上方按钮下载后在本地查看</p></div>)
                       ) : (<div className="text-center p-20 transition-all"><AlertCircle className="w-20 h-20 mx-auto text-slate-200 dark:text-slate-700 mb-6 transition-colors" /><p className="text-slate-400 dark:text-slate-500 font-black uppercase tracking-[0.4em]">当前档案预览失效</p></div>)}
                   </div>

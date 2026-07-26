@@ -5,6 +5,7 @@ import { formatBeijingTime } from '../constants';
 import { User, Attachment, AIModel } from '../types';
 import { fetchAiModels, streamAiChat } from '../lib/ai-client';
 import { API_URL, apiFetch } from '../lib/api';
+import { normalizeSafeImageUrl } from '../lib/safe-url';
 
 interface AICenterProps {
   currentUser: User;
@@ -440,7 +441,7 @@ const AICenter: React.FC<AICenterProps> = ({ currentUser, messages, onSendMessag
                         }`}>
                             {msg.type === 'image' ? (
                                 <div className="space-y-3">
-                                    <img src={msg.content} alt="AI Generated" className="rounded-xl w-full h-auto shadow-lg border border-slate-100 dark:border-slate-700 cursor-zoom-in" onClick={() => window.open(msg.content)} />
+                                    <img src={normalizeSafeImageUrl(msg.content)} alt="AI Generated" className="rounded-xl w-full h-auto shadow-lg border border-slate-100 dark:border-slate-700 cursor-zoom-in" onClick={() => { const url = normalizeSafeImageUrl(msg.content); if (url) window.open(url, '_blank', 'noopener,noreferrer'); }} />
                                     <div className="flex gap-2">
                                         <button 
                                             onClick={() => downloadMessage(msg.content, msg.model, 'image')} 

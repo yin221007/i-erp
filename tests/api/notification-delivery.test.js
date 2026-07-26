@@ -56,7 +56,11 @@ class NotificationApiPool {
     if (normalized.startsWith('UPDATE auth_sessions SET last_seen_at')) {
       return [{ affectedRows: 1 }, []];
     }
-    if (normalized.startsWith('REPLACE INTO `messages`')) {
+    if (normalized === 'SELECT json_data FROM `messages` WHERE id = ? LIMIT 1') {
+      const message = this.messages.get(parameters[0]);
+      return [message ? [{ json_data: JSON.stringify(message) }] : [], []];
+    }
+    if (normalized.startsWith('INSERT INTO `messages`')) {
       const [id, jsonData] = parameters;
       this.messages.set(id, JSON.parse(jsonData));
       return [{ affectedRows: 1 }, []];

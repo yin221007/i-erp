@@ -2,9 +2,10 @@
 import React, { useState, useMemo } from 'react';
 import ProjectSummary from './ProjectSummary';
 import TaskDetailModal from './TaskDetailModal';
+import ProjectMediaTimeline from './ProjectMediaTimeline';
 import { WorkflowNode, TaskStatus, Project, ArchiveItem, User, Approval } from '../types';
 import { INITIAL_WORKFLOW } from '../constants';
-import { Check, ChevronRight, AlertCircle, FileText, Calendar, ArrowLeft, RefreshCw, User as UserIcon, Filter, Search, ArrowRight, Layers, CheckCircle2, Circle } from 'lucide-react';
+import { Check, ChevronRight, AlertCircle, FileText, Calendar, ArrowLeft, RefreshCw, User as UserIcon, Filter, Search, ArrowRight, Layers, CheckCircle2, Circle, Images, ListChecks } from 'lucide-react';
 
 interface ProjectWorkflowProps {
   project: Project;
@@ -12,7 +13,7 @@ interface ProjectWorkflowProps {
   onUpdateNode: (updatedNode: WorkflowNode) => void;
   onUpdateProject?: (project: Project) => void;
   onBack: () => void;
-  onAddArchive: (archive: ArchiveItem) => void;
+  onAddArchive: (archive: ArchiveItem) => boolean | Promise<boolean>;
   onDeleteArchive: (id: string) => void;
   archives?: ArchiveItem[];
   currentUser: User;
@@ -22,6 +23,7 @@ interface ProjectWorkflowProps {
 
 const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpdateNode, onUpdateProject, onBack, onAddArchive, onDeleteArchive, archives, currentUser, users = [], backLabel = '返回项目台账' }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<'workflow' | 'media'>('workflow');
   const [taskFilter, setTaskFilter] = useState<'All' | 'Key' | 'Pending' | 'Mine'>('All');
   const [taskSearch, setTaskSearch] = useState('');
 
@@ -116,7 +118,7 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
           <h2 className="text-xl md:text-4xl font-black text-slate-900 dark:text-white tracking-tight truncate">{project.name}</h2>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+        {activeSection === 'workflow' && <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
             <div className="relative w-full sm:w-64 md:w-72">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
                 <input 
@@ -142,13 +144,45 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
                     </button>
                 ))}
             </div>
-        </div>
+        </div>}
       </div>
 
-      <ProjectSummary project={project} nodes={nodes || []} archives={archives} onUpdateProject={onUpdateProject} />
+      <div className="mb-6 flex w-full gap-1 rounded-2xl border border-slate-200 bg-slate-100 p-1.5 shadow-inner dark:border-slate-700 dark:bg-slate-900 md:mb-8 md:w-auto md:max-w-md">
+        <button
+          type="button"
+          onClick={() => setActiveSection('workflow')}
+          className={`flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-5 text-sm font-black transition focus:outline-none focus:ring-4 focus:ring-primary-500/15 ${
+            activeSection === 'workflow'
+              ? 'bg-white text-primary-700 shadow-md dark:bg-slate-800 dark:text-primary-300'
+              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+          }`}
+        >
+          <ListChecks className="h-4 w-4" />
+          执行流程
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('media')}
+          className={`flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-5 text-sm font-black transition focus:outline-none focus:ring-4 focus:ring-primary-500/15 ${
+            activeSection === 'media'
+              ? 'bg-white text-primary-700 shadow-md dark:bg-slate-800 dark:text-primary-300'
+              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+          }`}
+        >
+          <Images className="h-4 w-4" />
+          全过程影像
+          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[9px] text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+            {(archives || []).filter(item => item.category === 'Media').length}
+          </span>
+        </button>
+      </div>
 
-      {/* Engineering Lifecycle Roadmap - Compact Version */}
-      {nodes && nodes.length > 0 && (
+      {activeSection === 'workflow' ? (
+        <>
+          <ProjectSummary project={project} nodes={nodes || []} archives={archives} onUpdateProject={onUpdateProject} />
+
+          {/* Engineering Lifecycle Roadmap - Compact Version */}
+          {nodes && nodes.length > 0 && (
           <div className="bg-white dark:bg-slate-800 p-3 md:p-5 rounded-xl md:rounded-2xl border-2 border-slate-100 dark:border-slate-700 shadow-sm mb-6 md:mb-8 transition-all">
               <div className="flex items-center gap-3 mb-4">
                   <div className="p-1 bg-primary-600 rounded-lg shadow-md shadow-primary-500/20 flex-shrink-0">
@@ -191,9 +225,9 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
                   })}
               </div>
           </div>
-      )}
+          )}
 
-      <div className="space-y-10 md:space-y-16 mt-6 md:mt-10 relative px-1 md:px-2">
+          <div className="space-y-10 md:space-y-16 mt-6 md:mt-10 relative px-1 md:px-2">
         {(!nodes || nodes.length === 0) ? (
             <div className="flex flex-col items-center justify-center py-16 md:py-24 bg-white dark:bg-slate-900 rounded-2xl border-4 border-dashed border-slate-200 dark:border-slate-800 shadow-inner p-6 text-center">
                 <div className="p-5 md:p-6 bg-slate-100 dark:bg-slate-800 rounded-full mb-5 md:mb-6 shadow-sm">
@@ -299,7 +333,17 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
             </div>
             ))
         )}
-      </div>
+          </div>
+        </>
+      ) : (
+        <ProjectMediaTimeline
+          project={project}
+          archives={archives || []}
+          currentUser={currentUser}
+          onAddArchive={onAddArchive}
+          onDeleteArchive={onDeleteArchive}
+        />
+      )}
 
       {selectedNode && (
         <TaskDetailModal 

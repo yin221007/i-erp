@@ -53,7 +53,22 @@ test('rollback verifies a named snapshot before restoring data and old stack', a
   assert.ok(restoreUploads > restoreDatabase);
   assert.ok(startOld > restoreUploads);
   assert.match(source, /ROLLBACK_CONFIRMATION/);
+  assert.match(source, /OLD_ENV_FILE/);
+  assert.match(source, /--env-file "\$OLD_ENV_FILE"/);
   assert.doesNotMatch(source, /lucky.*(?:api|token)/i);
+});
+
+test('deployment restarts the preserved stack with its own pinned environment', async () => {
+  const [deploySource, rollbackSource] = await Promise.all([
+    readFile(deployUrl, 'utf8'),
+    readFile(rollbackUrl, 'utf8')
+  ]);
+
+  for (const source of [deploySource, rollbackSource]) {
+    assert.match(source, /OLD_ENV_FILE/);
+    assert.match(source, /--env-file "\$OLD_ENV_FILE" -f "\$OLD_COMPOSE_FILE"/);
+    assert.match(source, /Old environment file does not exist/);
+  }
 });
 
 test('restore drill records a manifest-bound success marker', async () => {

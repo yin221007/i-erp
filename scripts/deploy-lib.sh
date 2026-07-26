@@ -33,24 +33,26 @@ database_image() {
 }
 
 db_client() {
-  docker run --rm -i --entrypoint mariadb \
+  MYSQL_PWD="$DB_PASSWORD" docker run --rm -i \
+    --env MYSQL_PWD \
+    --entrypoint mariadb \
     "$(database_image)" \
     "${DB_CLIENT_ARGS[@]}" \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
-    --password="$DB_PASSWORD" \
     "$@"
 }
 
 db_dump() {
-  docker run --rm --entrypoint mariadb-dump \
+  MYSQL_PWD="$DB_PASSWORD" docker run --rm \
+    --env MYSQL_PWD \
+    --entrypoint mariadb-dump \
     "$(database_image)" \
     "${DB_CLIENT_ARGS[@]}" \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
-    --password="$DB_PASSWORD" \
     "$@"
 }
 

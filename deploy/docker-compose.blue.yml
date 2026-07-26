@@ -6,6 +6,7 @@ services:
       dockerfile: Dockerfile.backend
     container_name: ierp-blue-backend
     restart: unless-stopped
+    user: "${NAS_UID:?Set NAS_UID}:${NAS_GID:?Set NAS_GID}"
     mem_limit: 1g
     cpu_shares: 1024
     stop_grace_period: 30s

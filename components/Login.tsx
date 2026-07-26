@@ -22,7 +22,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, appName, logoUrl }) => {
     setError('');
     
     const cleanUsername = username.trim();
-    const cleanPassword = password.trim();
+    const cleanPassword = password;
 
     if (!cleanUsername || !cleanPassword) {
         setError('请输入用户名和密码');

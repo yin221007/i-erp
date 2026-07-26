@@ -106,29 +106,11 @@ function App() {
   // ==================================================================================
   // 2. DATA STATE MANAGEMENT
   // ==================================================================================
-  const [users, setUsers] = useState<User[]>(() => {
-      const saved = localStorage.getItem('ierp_users');
-      if (saved) {
-          try { return JSON.parse(saved); } catch(e) {}
-      }
-      return INITIAL_USERS;
-  });
-  const [projects, setProjects] = useState<Project[]>(() => {
-      const saved = localStorage.getItem('ierp_projects');
-      if (saved) {
-          try { return JSON.parse(saved); } catch(e) {}
-      }
-      return INITIAL_PROJECTS;
-  });
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
   
-  const [clients, setClients] = useState<Client[]>(() => {
-      const saved = localStorage.getItem('ierp_clients');
-      return saved ? JSON.parse(saved) : [];
-  });
-  const [equipment, setEquipment] = useState<Equipment[]>(() => {
-      const saved = localStorage.getItem('ierp_equipment');
-      return saved ? JSON.parse(saved) : [];
-  });
+  const [clients, setClients] = useState<Client[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [archives, setArchives] = useState<ArchiveItem[]>([]);
@@ -147,13 +129,7 @@ function App() {
   const [aiMessages, setAiMessages] = useState<any[]>([]);
   const [sessionAnnouncementsRead, setSessionAnnouncementsRead] = useState<boolean>(false);
 
-  const [appSettings, setAppSettings] = useState<AppSettings>(() => {
-      const saved = localStorage.getItem('ierp_settings');
-      if (saved) {
-        try { return JSON.parse(saved); } catch(e) {}
-      }
-      return INITIAL_SETTINGS;
-  });
+  const [appSettings, setAppSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const displayLogoUrl = useMemo(
     () => appSettings.logoUrl?.startsWith('/api/uploads/')
       ? `${API_URL}/branding/logo`
@@ -182,6 +158,13 @@ function App() {
   // ==================================================================================
   // 3. EFFECTS & INITIALIZATION
   // ==================================================================================
+
+  useEffect(() => {
+      // 旧版本曾缓存业务数据；升级后立即清除，仅保留界面偏好。
+      for (const key of ['users', 'projects', 'clients', 'equipment', 'settings']) {
+          localStorage.removeItem(`ierp_${key}`);
+      }
+  }, []);
 
   useEffect(() => {
       localStorage.setItem('ierp_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
@@ -317,22 +300,6 @@ function App() {
   // ==================================================================================
   // 4. HELPER FUNCTIONS
   // ==================================================================================
-
-  const loadLocal = <T,>(key: string, initial: T): T => {
-    const saved = localStorage.getItem(`ierp_${key}`);
-    if (saved) {
-        try { return JSON.parse(saved); } catch(e) { console.error("LS Parse Error", e); }
-    }
-    return initial;
-  };
-
-  const saveToLocal = (key: string, data: any) => {
-    try {
-        localStorage.setItem(`ierp_${key}`, JSON.stringify(data));
-    } catch (e) {
-        console.warn(`LocalStorage write failed for ${key}`);
-    }
-  };
 
   const safeJson = async (response: Response) => {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -522,13 +489,11 @@ function App() {
                 return p;
             });
             setProjects(processedProjects); 
-            saveToLocal('projects', processedProjects);
         }
         
         let loadedUsers = await getJson(responses[7]);
         if (Array.isArray(loadedUsers) && loadedUsers.length > 0) {
             setUsers(loadedUsers);
-            saveToLocal('users', loadedUsers);
             const self = loadedUsers.find((user: User) =>
               user.id === authenticatedUserId
             );
@@ -549,10 +514,10 @@ function App() {
         }
         
         const loadedClients = await getJson(responses[1]);
-        if (loadedClients) { setClients(loadedClients); saveToLocal('clients', loadedClients); }
+        if (loadedClients) setClients(loadedClients);
 
         const loadedEquipment = await getJson(responses[2]);
-        if (loadedEquipment) { setEquipment(loadedEquipment); saveToLocal('equipment', loadedEquipment); }
+        if (loadedEquipment) setEquipment(loadedEquipment);
 
         const loadedSchedule = await getJson(responses[3]);
         if (loadedSchedule) setSchedule(loadedSchedule);
@@ -572,7 +537,6 @@ function App() {
         if (Array.isArray(settingsData) && settingsData.length > 0) {
             const globalSettings = settingsData.find((s: AppSettings) => s.id === 'global_config') || settingsData[0];
             setAppSettings({ ...globalSettings, id: 'global_config' }); 
-            saveToLocal('settings', globalSettings);
         }
 
         const loadedPayments = await getJson(responses[9]);
@@ -630,7 +594,6 @@ function App() {
               let serverUsers = await safeJson(usersRes);
               if (Array.isArray(serverUsers) && serverUsers.length > 0) {
                   setUsers(serverUsers);
-                  saveToLocal('users', serverUsers);
                   const self = serverUsers.find((u: User) => u.id === currentU.id);
                   if (self && JSON.stringify(self) !== JSON.stringify(currentU)) {
                       setCurrentUser(self);
@@ -751,20 +714,30 @@ function App() {
   };
 
   const handleAddUser = async (user: User) => {
-      setUsers(prev => [...prev, user]);
-      try { 
-          await syncToBackend('users', 'POST', user); 
-          notify('用户创建成功', 'success'); 
-      } catch (e) { rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据'); }
+      try {
+          const response = await syncToBackend('users', 'POST', user);
+          const savedUser = await response.json() as User;
+          setUsers(prev => [...prev, savedUser]);
+          notify('用户创建成功', 'success');
+          return true;
+      } catch (e) {
+          rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据');
+          return false;
+      }
   };
 
   const handleUpdateUser = async (user: User) => {
-      setUsers(prev => prev.map(u => u.id === user.id ? user : u));
-      if (currentUser.id === user.id) setCurrentUser(user);
-      try { 
-          await syncToBackend('users', 'PUT', user, user.id); 
-          notify('用户资料已更新', 'success'); 
-      } catch (e) { rollbackAfterSyncFailure('用户资料更新失败，已恢复服务器最新数据'); }
+      try {
+          const response = await syncToBackend('users', 'PUT', user, user.id);
+          const savedUser = await response.json() as User;
+          setUsers(prev => prev.map(existing => existing.id === user.id ? savedUser : existing));
+          if (currentUser.id === user.id) setCurrentUser(savedUser);
+          notify('用户资料已更新', 'success');
+          return true;
+      } catch (e) {
+          rollbackAfterSyncFailure('用户资料更新失败，已恢复服务器最新数据');
+          return false;
+      }
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -822,10 +795,17 @@ function App() {
       });
   };
 
-  const handleAddArchive = (archive: ArchiveItem) => {
+  const handleAddArchive = async (archive: ArchiveItem) => {
       const newArc = { ...archive, createdAt: new Date().toISOString() };
-      setArchives(p => [...p, newArc]);
-      void syncToBackendOrRollback('archives', 'POST', newArc, undefined, '档案创建失败，已恢复服务器最新数据');
+      const saved = await syncToBackendOrRollback(
+          'archives',
+          'POST',
+          newArc,
+          undefined,
+          '档案创建失败，已恢复服务器最新数据'
+      );
+      if (saved) setArchives(p => [...p, newArc]);
+      return saved;
   };
 
   const handleUpdateArchive = (updatedArchive: ArchiveItem) => {

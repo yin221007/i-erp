@@ -17,6 +17,10 @@ const paymentDashboardUrl = new URL(
   '../../components/PaymentDashboard.tsx',
   import.meta.url
 );
+const userManagerUrl = new URL('../../components/UserManager.tsx', import.meta.url);
+const documentationUrl = new URL('../../components/Documentation.tsx', import.meta.url);
+const safeUrlUrl = new URL('../../lib/safe-url.ts', import.meta.url);
+const constantsUrl = new URL('../../constants.ts', import.meta.url);
 
 test('API client includes cookies and handles unauthorized sessions centrally', async () => {
   const source = await readFile(apiClientUrl, 'utf8');
@@ -40,6 +44,40 @@ test('application restores the session from the backend and never authenticates 
   assert.doesNotMatch(source, /ierp_current_user_id/);
 });
 
+test('business records are not persisted in browser local storage', async () => {
+  const source = await readFile(appUrl, 'utf8');
+
+  for (const key of ['users', 'projects', 'clients', 'equipment', 'settings']) {
+    assert.doesNotMatch(source, new RegExp(`localStorage\\.setItem\\(['\"]ierp_${key}`));
+  }
+  assert.match(source, /localStorage\.removeItem\(`ierp_\$\{key\}`\)/);
+});
+
+test('user passwords stay exact, masked, and optional during profile edits', async () => {
+  const [loginSource, userManagerSource, constantsSource] = await Promise.all([
+    readFile(loginUrl, 'utf8'),
+    readFile(userManagerUrl, 'utf8'),
+    readFile(constantsUrl, 'utf8')
+  ]);
+
+  assert.doesNotMatch(loginSource, /password\.trim\(\)/);
+  assert.match(userManagerSource, /type="password"/);
+  assert.match(userManagerSource, /留空则保持不变/);
+  assert.doesNotMatch(constantsSource, /password:\s*['\"]password['\"]/);
+});
+
+test('external document URLs are protocol-checked and never embedded as live pages', async () => {
+  const [documentationSource, safeUrlSource] = await Promise.all([
+    readFile(documentationUrl, 'utf8'),
+    readFile(safeUrlUrl, 'utf8')
+  ]);
+
+  assert.match(documentationSource, /normalizeExternalUrl/);
+  assert.match(documentationSource, /外部网页不在系统内嵌加载/);
+  assert.match(documentationSource, /sandbox=""/);
+  assert.match(safeUrlSource, /\['http:', 'https:'\]/);
+});
+
 test('the frontend does not offer destructive browser backup restore', async () => {
   const [appSource, settingsSource] = await Promise.all([
     readFile(appUrl, 'utf8'),
@@ -56,6 +94,36 @@ test('engineering archives use inline preview URLs and explicit download URLs', 
   assert.match(source, /download=1/);
   assert.match(source, /iframe src=\{previewItem\.url\}/);
   assert.match(source, /img src=\{previewItem\.url\}/);
+  assert.match(source, /cleanupToken/);
+  assert.match(source, /method:\s*'DELETE'/);
+});
+
+test('payment cards avoid nesting buttons inside a synthetic button container', async () => {
+  const source = await readFile(paymentDashboardUrl, 'utf8');
+
+  assert.doesNotMatch(source, /<section[\s\S]{0,160}role="button"/);
+});
+
+test('payment cards open details from the whole card without disabled metric controls', async () => {
+  const source = await readFile(paymentDashboardUrl, 'utf8');
+
+  assert.match(
+    source,
+    /<section[\s\S]{0,220}onClick=\{\(\) => setSelectedPayment\(item\)\}/
+  );
+  assert.doesNotMatch(source, /disabled=\{!isClickable\}/);
+  assert.match(source, /return isClickable \? \(/);
+});
+
+test('invoice preview is available only for invoiced payments or matched archives', async () => {
+  const source = await readFile(paymentDashboardUrl, 'utf8');
+
+  assert.match(
+    source,
+    /const canPreviewInvoice = \(item\.invoicedAmount \|\| 0\) > 0 \|\| invoiceArchives\.length > 0/
+  );
+  assert.match(source, /\{canPreviewInvoice && \(/);
+  assert.doesNotMatch(source, /if \(\(payment\.invoicedAmount \|\| 0\) <= 0\) return/);
 });
 
 test('payment summary cards use visible semantic hover colors', async () => {

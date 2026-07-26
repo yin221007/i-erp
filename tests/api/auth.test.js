@@ -116,9 +116,10 @@ const config = {
 };
 
 async function createAuthTestApp() {
-  const [adminPassword, memberPassword] = await Promise.all([
+  const [adminPassword, memberPassword, spacedPassword] = await Promise.all([
     hashPassword('password'),
-    hashPassword('member-password')
+    hashPassword('member-password'),
+    hashPassword(' exact password ')
   ]);
   const pool = new FakeAuthPool([
     {
@@ -144,6 +145,16 @@ async function createAuthTestApp() {
           pushPlusToken: 'existing-secret'
         }
       }
+    },
+    {
+      id: 'u-3',
+      nickname: 'spaced',
+      password: spacedPassword,
+      department: '工程部',
+      role: 'User',
+      permission: 'ReadWrite',
+      isDefaultAdmin: false,
+      avatar: ''
     }
   ]);
   return { app: createApp({ pool, config }), pool };
@@ -166,6 +177,20 @@ test('login issues a secure HttpOnly cookie and returns a safe user', async () =
   );
   assert.equal(response.body.user.nickname, 'admin');
   assert.equal('password' in response.body.user, false);
+});
+
+test('login preserves password whitespace exactly', async () => {
+  const { app } = await createAuthTestApp();
+
+  await request(app)
+    .post('/auth/login')
+    .send({ username: 'spaced', password: ' exact password ' })
+    .expect(200);
+
+  await request(app)
+    .post('/auth/login')
+    .send({ username: 'spaced', password: 'exact password' })
+    .expect(401);
 });
 
 test('forged x-user-id does not authenticate a request', async () => {

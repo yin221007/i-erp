@@ -92,7 +92,7 @@ start_clone_candidate() {
 
 stop_old_stack() {
   log "Stopping old stack after maintenance mode confirmation"
-  docker compose -f "$OLD_COMPOSE_FILE" stop
+  docker compose --env-file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" stop
   old_stopped=1
 }
 
@@ -143,7 +143,7 @@ automatic_rollback() {
           }
       else
         log "Deployment failed before production migration; restarting old stack"
-        docker compose -f "$OLD_COMPOSE_FILE" up -d || {
+        docker compose --env-file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" up -d || {
           printf 'OLD STACK RESTART FAILED. Keep maintenance mode enabled.\n' >&2
         }
       fi
@@ -178,7 +178,9 @@ main() {
   require_env \
     DB_HOST DB_USER DB_PASSWORD DB_NAME \
     PUBLIC_ORIGINS SESSION_SECRET MAINTENANCE_JOB_SECRET \
-    UPLOADS_PATH BACKUP_ROOT MAINTENANCE_QUEUE_PATH OLD_COMPOSE_FILE
+    UPLOADS_PATH BACKUP_ROOT MAINTENANCE_QUEUE_PATH OLD_COMPOSE_FILE OLD_ENV_FILE
+  [[ -f "$OLD_COMPOSE_FILE" ]] || die "Old Compose file does not exist"
+  [[ -f "$OLD_ENV_FILE" ]] || die "Old environment file does not exist"
   require_command docker curl sha256sum find
 
   verify_restore_drill "$RESTORE_DRILL_SNAPSHOT"

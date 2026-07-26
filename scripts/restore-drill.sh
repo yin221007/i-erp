@@ -46,12 +46,11 @@ database_created=0
 cleanup() {
   status=$?
   if [[ "$database_created" -eq 1 && "${KEEP_RESTORE_DB:-0}" != "1" ]]; then
-    mariadb \
+    MYSQL_PWD="$DB_PASSWORD" mariadb \
       "${DB_CLIENT_ARGS[@]}" \
       --host="$DB_HOST" \
       --port="${DB_PORT:-3306}" \
       --user="$DB_USER" \
-      --password="$DB_PASSWORD" \
       --execute="DROP DATABASE IF EXISTS \`$restore_database\`" \
       >/dev/null 2>&1 || true
   fi
@@ -59,22 +58,20 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mariadb \
+MYSQL_PWD="$DB_PASSWORD" mariadb \
   "${DB_CLIENT_ARGS[@]}" \
   --host="$DB_HOST" \
   --port="${DB_PORT:-3306}" \
   --user="$DB_USER" \
-  --password="$DB_PASSWORD" \
   --execute="CREATE DATABASE \`$restore_database\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 database_created=1
 
 gzip -dc "$BACKUP_DIR/database.sql.gz" |
-  mariadb \
+  MYSQL_PWD="$DB_PASSWORD" mariadb \
     "${DB_CLIENT_ARGS[@]}" \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
-    --password="$DB_PASSWORD" \
     "$restore_database"
 
 while IFS=$'\t' read -r table_name expected_count; do
@@ -84,14 +81,13 @@ while IFS=$'\t' read -r table_name expected_count; do
   fi
 
   actual_count="$(
-    mariadb \
+    MYSQL_PWD="$DB_PASSWORD" mariadb \
       "${DB_CLIENT_ARGS[@]}" \
       --batch \
       --skip-column-names \
       --host="$DB_HOST" \
       --port="${DB_PORT:-3306}" \
       --user="$DB_USER" \
-      --password="$DB_PASSWORD" \
       "$restore_database" \
       --execute="SELECT COUNT(*) FROM \`$table_name\`"
   )"

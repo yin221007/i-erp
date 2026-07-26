@@ -336,7 +336,6 @@ export const INITIAL_USERS: User[] = [
   { 
     id: 'u-1', 
     nickname: 'admin', 
-    password: 'password',
     department: '总经办', 
     role: 'Admin', 
     isDefaultAdmin: true,

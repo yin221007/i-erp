@@ -42,7 +42,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ node, isOpen, onClose
 
   if (!isOpen) return null;
 
-  // 严格同步工程档案(EngineeringArchives)的分类及顺序，确保全系统分类模板一致
+  // 常规附件分类与工程档案保持一致；过程影像通过工程详情的专用入口管理。
   const categories: { id: ArchiveCategory; label: string }[] = [
     { id: 'Drawing', label: '设计图纸' },
     { id: 'Contract', label: '合同文书' },
