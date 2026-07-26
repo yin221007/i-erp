@@ -1093,8 +1093,8 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                         data={projectStatusSlices}
                         dataKey="value"
                         nameKey="name"
-                        innerRadius={54}
-                        outerRadius={82}
+                        innerRadius={50}
+                        outerRadius={74}
                         paddingAngle={projectStatusSlices.length > 1 ? 3 : 0}
                         cornerRadius={projectStatusSlices.length > 1 ? 8 : 0}
                         stroke="none"

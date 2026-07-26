@@ -199,6 +199,8 @@ test('preview feedback keeps personal headings, a complete status ring, and cust
   assert.match(homeSource, />\s*我的首页\s*</);
   assert.doesNotMatch(homeSource, /经营首页/);
   assert.match(homeSource, /projectStatusChart\.filter\(entry => entry\.value > 0\)/);
+  assert.match(homeSource, /innerRadius=\{50\}/);
+  assert.match(homeSource, /outerRadius=\{74\}/);
   assert.match(homeSource, /paddingAngle=\{projectStatusSlices\.length > 1 \? 3 : 0\}/);
   assert.match(homeSource, /cornerRadius=\{projectStatusSlices\.length > 1 \? 8 : 0\}/);
   assert.match(projectListSource, />\s*我的工程项目\s*</);
