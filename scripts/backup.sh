@@ -79,7 +79,7 @@ fi
 umask 077
 mkdir "$incomplete_directory"
 
-mariadb-dump \
+MYSQL_PWD="$DB_PASSWORD" mariadb-dump \
   "${DB_CLIENT_ARGS[@]}" \
   --single-transaction \
   --quick \
@@ -88,13 +88,14 @@ mariadb-dump \
   --host="$DB_HOST" \
   --port="${DB_PORT:-3306}" \
   --user="$DB_USER" \
-  --password="$DB_PASSWORD" \
   "$DB_NAME" |
   gzip -1 > "$incomplete_directory/database.sql.gz"
 
 tar \
   --create \
   --gzip \
+  --exclude='./.ierp-upload-chunks' \
+  --exclude='./.ierp-thumbnails' \
   --file="$incomplete_directory/uploads.tar.gz" \
   --directory="$UPLOADS_ROOT" \
   .
@@ -106,28 +107,26 @@ while IFS= read -r table_name; do
     exit 65
   fi
   table_count="$(
-    mariadb \
+    MYSQL_PWD="$DB_PASSWORD" mariadb \
       "${DB_CLIENT_ARGS[@]}" \
       --batch \
       --skip-column-names \
       --host="$DB_HOST" \
       --port="${DB_PORT:-3306}" \
       --user="$DB_USER" \
-      --password="$DB_PASSWORD" \
       "$DB_NAME" \
       --execute="SELECT COUNT(*) FROM \`$table_name\`"
   )"
   printf '%s\t%s\n' "$table_name" "$table_count" \
     >> "$incomplete_directory/table-counts.tsv"
 done < <(
-  mariadb \
+  MYSQL_PWD="$DB_PASSWORD" mariadb \
     "${DB_CLIENT_ARGS[@]}" \
     --batch \
     --skip-column-names \
     --host="$DB_HOST" \
     --port="${DB_PORT:-3306}" \
     --user="$DB_USER" \
-    --password="$DB_PASSWORD" \
     "$DB_NAME" \
     --execute="SHOW TABLES"
 )
@@ -149,7 +148,16 @@ if [[ -n "${DEPLOY_ROOT:-}" && -d "$DEPLOY_ROOT" ]]; then
   fi
 fi
 
-upload_file_count="$(find "$UPLOADS_ROOT" -type f | wc -l | tr -d ' ')"
+upload_file_count="$(
+  find "$UPLOADS_ROOT" \
+    \( \
+      -path "$UPLOADS_ROOT/.ierp-upload-chunks" -o \
+      -path "$UPLOADS_ROOT/.ierp-thumbnails" \
+    \) -prune -o \
+    -type f -print |
+    wc -l |
+    tr -d ' '
+)"
 generation_size_bytes="$(
   du -sk "$incomplete_directory" |
     awk '{ print $1 * 1024 }'

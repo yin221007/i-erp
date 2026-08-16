@@ -10,7 +10,18 @@ import {
 } from '../../server/auth/passwords.js';
 
 class FakeMigrationDatabase {
-  constructor({ users = [], production = [], aiModels = [], clients = [], equipment = [], docs = [] } = {}) {
+  constructor({
+    users = [],
+    production = [],
+    aiModels = [],
+    clients = [],
+    equipment = [],
+    docs = [],
+    projects = [],
+    archives = [],
+    approvals = [],
+    recycleBin = []
+  } = {}) {
     this.users = new Map(users.map(record => [record.id, structuredClone(record)]));
     this.production = new Map(
       production.map(record => [record.rowId, structuredClone(record.data)])
@@ -21,6 +32,10 @@ class FakeMigrationDatabase {
     this.clients = new Map(clients.map(record => [record.id, structuredClone(record)]));
     this.equipment = new Map(equipment.map(record => [record.id, structuredClone(record)]));
     this.docs = new Map(docs.map(record => [record.id, structuredClone(record)]));
+    this.projects = new Map(projects.map(record => [record.id, structuredClone(record)]));
+    this.archives = new Map(archives.map(record => [record.id, structuredClone(record)]));
+    this.approvals = new Map(approvals.map(record => [record.id, structuredClone(record)]));
+    this.recycleBin = new Map(recycleBin.map(record => [record.id, structuredClone(record)]));
     this.migrations = new Set();
     this.snapshot = null;
   }
@@ -37,6 +52,10 @@ class FakeMigrationDatabase {
       clients: structuredClone(this.clients),
       equipment: structuredClone(this.equipment),
       docs: structuredClone(this.docs),
+      projects: structuredClone(this.projects),
+      archives: structuredClone(this.archives),
+      approvals: structuredClone(this.approvals),
+      recycleBin: structuredClone(this.recycleBin),
       migrations: structuredClone(this.migrations)
     };
   }
@@ -53,6 +72,10 @@ class FakeMigrationDatabase {
     this.clients = this.snapshot.clients;
     this.equipment = this.snapshot.equipment;
     this.docs = this.snapshot.docs;
+    this.projects = this.snapshot.projects;
+    this.archives = this.snapshot.archives;
+    this.approvals = this.snapshot.approvals;
+    this.recycleBin = this.snapshot.recycleBin;
     this.migrations = this.snapshot.migrations;
     this.snapshot = null;
   }
@@ -97,6 +120,45 @@ class FakeMigrationDatabase {
       }
     }
 
+    for (const table of ['projects', 'archives']) {
+      if (normalized.startsWith(`SELECT id, json_data FROM ${table}`)) {
+        return [[...this[table]].map(([id, data]) => ({
+          id,
+          json_data: JSON.stringify(data)
+        })), []];
+      }
+    }
+
+    if (normalized.startsWith('INSERT INTO archives')) {
+      const [id, json] = parameters;
+      this.archives.set(id, JSON.parse(json));
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized.startsWith('SELECT id, json_data FROM recycle_bin')) {
+      return [[...this.recycleBin].map(([id, data]) => ({
+        id,
+        json_data: JSON.stringify(data)
+      })), []];
+    }
+
+    if (normalized === 'SELECT id FROM approvals WHERE id = ? FOR UPDATE') {
+      return [this.approvals.has(parameters[0])
+        ? [{ id: parameters[0] }]
+        : [], []];
+    }
+
+    if (normalized.startsWith('INSERT INTO approvals')) {
+      const [id, json] = parameters;
+      this.approvals.set(id, JSON.parse(json));
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized === 'DELETE FROM recycle_bin WHERE id = ?') {
+      const deleted = this.recycleBin.delete(parameters[0]);
+      return [{ affectedRows: deleted ? 1 : 0 }, []];
+    }
+
     if (normalized.startsWith('SELECT id, json_data FROM production')) {
       return [[...this.production].map(([id, data]) => ({
         id,
@@ -107,6 +169,24 @@ class FakeMigrationDatabase {
     if (normalized.startsWith('UPDATE production SET json_data')) {
       const [json, id] = parameters;
       this.production.set(id, JSON.parse(json));
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized.startsWith('UPDATE production SET id = ?, json_data')) {
+      const [nextId, json, previousId] = parameters;
+      const previous = this.production.get(previousId);
+      if (!previous) return [{ affectedRows: 0 }, []];
+      this.production.delete(previousId);
+      this.production.set(nextId, JSON.parse(json));
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized.startsWith('UPDATE production SET id = ? WHERE id = ?')) {
+      const [nextId, previousId] = parameters;
+      const previous = this.production.get(previousId);
+      if (!previous) return [{ affectedRows: 0 }, []];
+      this.production.delete(previousId);
+      this.production.set(nextId, previous);
       return [{ affectedRows: 1 }, []];
     }
 
@@ -174,7 +254,7 @@ test('password migration preserves the accepted password and runs once', async (
   assert.equal(database.migrations.has('002_hash_user_passwords'), true);
 });
 
-test('production migration assigns projectId as the stable JSON id', async () => {
+test('production migrations align both JSON and database IDs with projectId', async () => {
   const database = new FakeMigrationDatabase({
     production: [{
       rowId: 'legacy-row',
@@ -184,8 +264,31 @@ test('production migration assigns projectId as the stable JSON id', async () =>
 
   await runMigrations(database);
 
-  assert.equal(database.production.get('legacy-row').id, 'project-7');
+  assert.equal(database.production.has('legacy-row'), false);
+  assert.equal(database.production.get('project-7').id, 'project-7');
   assert.equal(database.migrations.has('003_normalize_production_ids'), true);
+  assert.equal(database.migrations.has('011_align_production_primary_keys'), true);
+});
+
+test('production primary key migration safely handles crossed legacy IDs', async () => {
+  const database = new FakeMigrationDatabase({
+    production: [
+      {
+        rowId: 'project-b',
+        data: { projectId: 'project-a', projectName: 'Project A' }
+      },
+      {
+        rowId: 'legacy-b',
+        data: { projectId: 'project-b', projectName: 'Project B' }
+      }
+    ]
+  });
+
+  await runMigrations(database);
+
+  assert.deepEqual([...database.production.keys()].sort(), ['project-a', 'project-b']);
+  assert.equal(database.production.get('project-a').id, 'project-a');
+  assert.equal(database.production.get('project-b').id, 'project-b');
 });
 
 test('duplicate production project IDs roll back and remain unmarked', async () => {
@@ -300,7 +403,122 @@ test('owner-scoped resource migration assigns legacy shared records to the defau
   assert.equal(database.migrations.has('009_backfill_owner_scoped_resources'), true);
 });
 
-test('permission backfill and scoped owner backfill are the latest additive migrations', () => {
-  assert.equal(MIGRATION_VERSIONS.at(-2), '008_backfill_user_permissions');
-  assert.equal(MIGRATION_VERSIONS.at(-1), '009_backfill_owner_scoped_resources');
+test('project attachment migration creates missing archives once and preserves existing links', async () => {
+  const attachment = {
+    id: 'invoice-legacy',
+    name: '历史发票.pdf',
+    url: '/api/uploads/history.pdf',
+    type: 'application/pdf',
+    size: '128 KB',
+    uploadDate: '2026-01-01T00:00:00.000Z',
+    category: 'Invoice'
+  };
+  const existingAttachment = {
+    id: 'drawing-existing',
+    name: '已有图纸.pdf',
+    url: '/api/uploads/existing.pdf',
+    type: 'application/pdf',
+    size: '256 KB',
+    uploadDate: '2026-01-02T00:00:00.000Z',
+    category: 'Drawing'
+  };
+  const database = new FakeMigrationDatabase({
+    projects: [{
+      id: 'project-1',
+      name: '迁移测试工程',
+      manager: '项目经理',
+      nodes: [{
+        id: 'node-1',
+        attachments: [attachment, existingAttachment]
+      }]
+    }],
+    archives: [{
+      id: existingAttachment.id,
+      title: '已有图纸',
+      projectId: 'project-1',
+      url: existingAttachment.url
+    }]
+  });
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.equal(database.archives.size, 2);
+  assert.deepEqual(database.archives.get(attachment.id), {
+    id: attachment.id,
+    title: '历史发票',
+    category: 'Invoice',
+    projectName: '迁移测试工程',
+    projectId: 'project-1',
+    fileType: 'PDF',
+    size: '128 KB',
+    uploadDate: '2026-01-01T00:00:00.000Z',
+    uploader: '项目经理',
+    url: '/api/uploads/history.pdf',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  });
+  assert.equal(
+    database.migrations.has('010_backfill_project_attachment_archives'),
+    true
+  );
+});
+
+test('approved deletion approvals accidentally recycled are restored for idempotent execution', async () => {
+  const approval = {
+    id: 'approval-history-1',
+    title: '删除历史档案',
+    type: 'Deletion',
+    applicantId: 'u-applicant',
+    applicantName: '申请人',
+    department: '工程部',
+    strategy: 'OR_SIGN',
+    approverIds: ['u-admin'],
+    approverNamesDisplay: '管理员',
+    status: 'Approved',
+    currentContent: '申请删除档案',
+    currentAttachments: [],
+    versions: [{
+      version: 1,
+      content: '申请删除档案',
+      attachments: [],
+      submittedAt: '2026-07-28T22:00:00.000Z',
+      outcomes: [{
+        status: 'Approved',
+        approverId: 'u-admin',
+        approverName: '管理员',
+        comment: '同意',
+        date: '2026-07-28T23:00:00.000Z'
+      }]
+    }],
+    createdAt: '2026-07-28T22:00:00.000Z',
+    updatedAt: '2026-07-28T23:00:00.000Z',
+    relatedId: 'archive-1',
+    relatedType: 'archives'
+  };
+  const database = new FakeMigrationDatabase({
+    recycleBin: [{
+      id: 'recycle-approval-1',
+      originalId: approval.id,
+      resourceType: 'approvals',
+      deletedAt: '2026-07-28T23:23:29.996Z',
+      data: approval
+    }]
+  });
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.equal(database.recycleBin.has('recycle-approval-1'), false);
+  assert.deepEqual(database.approvals.get(approval.id), approval);
+  assert.equal(
+    database.migrations.has('012_restore_auto_deleted_approval_history'),
+    true
+  );
+});
+
+test('recent additive migrations keep their required order', () => {
+  assert.equal(MIGRATION_VERSIONS.at(-4), '009_backfill_owner_scoped_resources');
+  assert.equal(MIGRATION_VERSIONS.at(-3), '010_backfill_project_attachment_archives');
+  assert.equal(MIGRATION_VERSIONS.at(-2), '011_align_production_primary_keys');
+  assert.equal(MIGRATION_VERSIONS.at(-1), '012_restore_auto_deleted_approval_history');
 });

@@ -2,6 +2,9 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { PaymentRecord, Project, User, Client, ArchiveItem } from '../types';
 import { Search, Plus, Edit2, Trash2, Save, X, Calculator, AlertTriangle, ShieldCheck, Download, Upload, JapaneseYen, Wallet, FileCheck } from 'lucide-react';
+import { getInvoiceArchives as findInvoiceArchives, resolvePaymentProject } from '../lib/payment-archives.js';
+
+const PdfPreview = React.lazy(() => import('./PdfPreview'));
 
 interface PaymentDashboardProps {
   payments: PaymentRecord[];
@@ -31,6 +34,7 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PaymentRecord | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
   const [invoicePreviewItem, setInvoicePreviewItem] = useState<ArchiveItem | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,19 +90,16 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
 
   const getArchiveDownloadUrl = (url?: string) => url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '#';
 
-  const findInvoiceArchive = (payment: PaymentRecord) => archives.find(archive =>
-    archive.category === 'Invoice' && (
-      Boolean(payment.projectId && archive.projectId === payment.projectId) ||
-      archive.projectName === payment.projectName ||
-      archive.title.includes(payment.projectName)
-    )
-  );
+  const getPaymentProject = (payment: PaymentRecord) =>
+    resolvePaymentProject(payment, projects);
+
+  const getInvoiceArchives = (payment: PaymentRecord) =>
+    findInvoiceArchives(payment, projects, archives);
 
   const openInvoicePreview = (payment: PaymentRecord) => {
-    if ((payment.invoicedAmount || 0) <= 0) return;
-    const archive = findInvoiceArchive(payment);
+    const archive = getInvoiceArchives(payment)[0];
     if (!archive) {
-      alert('未找到该工程关联的财务发票档案，请先在工程档案中归档发票');
+      alert('未找到该工程关联的财务发票档案。请确认工程档案中的资料类别为“财务发票”，并已关联到同一个工程项目。');
       return;
     }
     setInvoicePreviewItem(archive);
@@ -465,13 +466,25 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
               const canEditItem = currentUser.role === 'Admin' || item.managerName === currentUser.nickname || item.creatorId === currentUser.id;
               const isPaidOff = remaining <= 0 && progress >= 100;
               const isFocused = focusTarget?.paymentId === item.id || Boolean(focusTarget?.projectId && item.projectId === focusTarget.projectId);
+              const invoiceArchives = getInvoiceArchives(item);
+              const canPreviewInvoice = (item.invoicedAmount || 0) > 0 || invoiceArchives.length > 0;
 
               return (
-                <section key={item.id} className={`group rounded-3xl border-2 px-4 py-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg ${isPaidOff ? 'border-emerald-300 bg-emerald-50/90 dark:border-emerald-700 dark:bg-emerald-950/25' : 'border-slate-200 bg-white hover:border-primary-300 dark:border-slate-600 dark:bg-slate-800 dark:hover:border-primary-600'} ${isFocused ? 'ring-4 ring-primary-500/20 border-primary-400 dark:border-primary-500' : ''}`}>
+                <section
+                  key={item.id}
+                  onClick={() => setSelectedPayment(item)}
+                  className={`group cursor-pointer rounded-3xl border-2 px-4 py-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg ${isPaidOff ? 'border-emerald-300 bg-emerald-50/90 dark:border-emerald-700 dark:bg-emerald-950/25' : 'border-slate-200 bg-white hover:border-primary-300 dark:border-slate-600 dark:bg-slate-800 dark:hover:border-primary-600'} ${isFocused ? 'ring-4 ring-primary-500/20 border-primary-400 dark:border-primary-500' : ''}`}
+                >
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className={`truncate text-base font-black ${isPaidOff ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-900 dark:text-white'}`}>{item.projectName}</h3>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPayment(item)}
+                          className={`truncate text-left text-base font-black hover:underline ${isPaidOff ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-900 dark:text-white'}`}
+                        >
+                          {item.projectName}
+                        </button>
                         {isPaidOff && <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">已100%回款</span>}
                         {item.projectId && <span className="rounded-full bg-primary-50 px-2.5 py-1 text-[10px] font-black text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">已关联工程</span>}
                       </div>
@@ -490,22 +503,37 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
                         ['审定价', displayAmount, item.auditedAmount > 0 ? '审定决算价' : '暂定合同价', 'text-slate-900 dark:text-white'],
                         ['已收', item.receivedAmount || 0, '实际到账', 'text-emerald-600 dark:text-emerald-300'],
                         ['应收余额', remaining, remaining > 0 ? '待追回' : '已结清', remaining > 0 ? 'text-orange-600 dark:text-orange-300' : 'text-slate-400'],
-                        ['已开票', item.invoicedAmount || 0, '点击预览发票', 'text-primary-600 dark:text-primary-300']
+                        ['已开票', item.invoicedAmount || 0, canPreviewInvoice ? '点击预览发票' : '暂无发票', 'text-primary-600 dark:text-primary-300']
                       ].map(([label, value, hint, tone]) => {
                         const isInvoiceMetric = label === '已开票';
-                        const isClickable = isInvoiceMetric && Number(value) > 0;
-                        return (
-                          <button
-                            key={String(label)}
-                            type="button"
-                            disabled={!isClickable}
-                            onClick={() => openInvoicePreview(item)}
-                            className={`rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-left shadow-sm ring-1 ring-white transition-all dark:border-slate-600 dark:bg-slate-900 dark:ring-slate-700/60 ${isClickable ? 'cursor-pointer hover:border-primary-300 hover:bg-primary-50 dark:hover:border-primary-600 dark:hover:bg-primary-950/30' : 'cursor-default'}`}
-                          >
+                        const isClickable = isInvoiceMetric && canPreviewInvoice;
+                        const content = (
+                          <>
                             <p className="text-[10px] font-black text-slate-500 dark:text-slate-400">{label}</p>
                             <p className={`mt-0.5 truncate font-mono text-sm font-black ${tone}`}>{Number(value).toLocaleString()}</p>
                             <p className="mt-1 text-[9px] font-black text-slate-500 dark:text-slate-400">{hint}</p>
+                          </>
+                        );
+
+                        return isClickable ? (
+                          <button
+                            key={String(label)}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openInvoicePreview(item);
+                            }}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-left shadow-sm ring-1 ring-white transition-all hover:border-primary-300 hover:bg-primary-50 dark:border-slate-600 dark:bg-slate-900 dark:ring-slate-700/60 dark:hover:border-primary-600 dark:hover:bg-primary-950/30"
+                          >
+                            {content}
                           </button>
+                        ) : (
+                          <div
+                            key={String(label)}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-left shadow-sm ring-1 ring-white transition-all group-hover:border-primary-200 dark:border-slate-600 dark:bg-slate-900 dark:ring-slate-700/60 dark:group-hover:border-primary-700"
+                          >
+                            {content}
+                          </div>
                         );
                       })}
                     </div>
@@ -520,12 +548,33 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
                       <span className="rounded-full border border-purple-100 bg-purple-50 px-2.5 py-1 text-purple-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">质保: {item.warrantyPeriod || '未约定'}</span>
                       <span className={`rounded-full border px-2.5 py-1 ${isOverdue ? 'border-red-400 bg-red-500 text-white' : isDueSoon ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-slate-100 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300'}`}>尾款: {item.finalPaymentDueDate || '-'}</span>
                     </div>
-                    {canAdd && (
-                      <div className="flex justify-end gap-2">
-                        {canEditItem && <button onClick={() => handleOpenEdit(item)} className="rounded-2xl border border-slate-100 bg-white p-2.5 text-slate-400 shadow-sm transition hover:text-primary-600 dark:border-slate-700 dark:bg-slate-900"><Edit2 className="h-4 w-4" /></button>}
-                        {canDelete && <button onClick={() => handleRemove(item)} className="rounded-2xl border border-slate-100 bg-white p-2.5 text-slate-300 shadow-sm transition hover:text-red-500 dark:border-slate-700 dark:bg-slate-900"><Trash2 className="h-4 w-4" /></button>}
-                      </div>
-                    )}
+                    <div className="flex justify-end gap-2">
+                      {canPreviewInvoice && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openInvoicePreview(item);
+                          }}
+                          className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-[10px] font-black text-primary-700 hover:bg-primary-100 dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-300"
+                        >
+                          预览发票
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPayment(item)}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black text-slate-600 hover:border-primary-300 hover:text-primary-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                      >
+                        查看详情
+                      </button>
+                      {canAdd && (
+                        <>
+                        {canEditItem && <button onClick={(event) => { event.stopPropagation(); handleOpenEdit(item); }} className="rounded-2xl border border-slate-100 bg-white p-2.5 text-slate-400 shadow-sm transition hover:text-primary-600 dark:border-slate-700 dark:bg-slate-900"><Edit2 className="h-4 w-4" /></button>}
+                        {canDelete && <button onClick={(event) => { event.stopPropagation(); handleRemove(item); }} className="rounded-2xl border border-slate-100 bg-white p-2.5 text-slate-300 shadow-sm transition hover:text-red-500 dark:border-slate-700 dark:bg-slate-900"><Trash2 className="h-4 w-4" /></button>}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </section>
               );
@@ -541,6 +590,123 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
           )}
       </div>
 
+      {selectedPayment && (() => {
+        const remaining = calculateRemaining(selectedPayment);
+        const progress = calculateProgress(selectedPayment);
+        const displayAmount = selectedPayment.auditedAmount > 0
+          ? selectedPayment.auditedAmount
+          : selectedPayment.contractAmount + selectedPayment.variationAmount;
+        const invoiceArchives = getInvoiceArchives(selectedPayment);
+        const group = getPaymentGroup(selectedPayment);
+        const project = getPaymentProject(selectedPayment);
+        const invoiceGap = Math.max((selectedPayment.invoicedAmount || 0) - (selectedPayment.receivedAmount || 0), 0);
+
+        return (
+          <div className="fixed inset-0 z-[58] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
+            <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[2.5rem] bg-white shadow-2xl dark:bg-slate-800">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-700 dark:bg-slate-900">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black tracking-[0.24em] text-primary-600">工程回款详情</p>
+                  <h3 className="mt-2 truncate text-2xl font-black text-slate-900 dark:text-white">{selectedPayment.projectName}</h3>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black text-slate-500">
+                    <span>ID: {selectedPayment.id}</span>
+                    <span>负责人: {selectedPayment.managerName || '-'}</span>
+                    <span>甲方: {selectedPayment.clientContactName || '-'}</span>
+                    {project && <span>工程状态: {project.status}</span>}
+                  </div>
+                </div>
+                <button onClick={() => setSelectedPayment(null)} className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
+              </div>
+
+              <div className="overflow-y-auto p-6 custom-scrollbar">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  {[
+                    ['审定价', displayAmount, selectedPayment.auditedAmount > 0 ? '审定决算价' : '合同价+增减项', 'text-slate-900 dark:text-white'],
+                    ['已回款', selectedPayment.receivedAmount || 0, '实际到账', 'text-emerald-600 dark:text-emerald-300'],
+                    ['应收余额', remaining, remaining > 0 ? '待追回' : '已结清', remaining > 0 ? 'text-orange-600 dark:text-orange-300' : 'text-emerald-600 dark:text-emerald-300'],
+                    ['已开票', selectedPayment.invoicedAmount || 0, invoiceArchives.length > 0 ? `${invoiceArchives.length} 份发票档案` : '未匹配档案', 'text-primary-600 dark:text-primary-300']
+                  ].map(([label, value, hint, tone]) => (
+                    <div key={String(label)} className="rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                      <p className="text-[10px] font-black tracking-widest text-slate-500">{label}</p>
+                      <p className={`mt-2 font-mono text-2xl font-black ${tone}`}>{formatCurrency(Number(value))}</p>
+                      <p className="mt-2 text-[10px] font-bold text-slate-400">{hint}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_0.9fr]">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">回款进度</h4>
+                      <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-black text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">{progress}%</span>
+                    </div>
+                    <div className="h-3 rounded-full bg-slate-100 dark:bg-slate-700">
+                      <div className={`h-full rounded-full ${progress >= 100 ? 'bg-emerald-500' : 'bg-primary-600'}`} style={{ width: `${progress}%` }} />
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-bold text-slate-500">
+                      <span>分组：{group.label}</span>
+                      <span>尾款截止：{selectedPayment.finalPaymentDueDate || '-'}</span>
+                      <span>质保：{selectedPayment.warrantyPeriod || '未约定'}</span>
+                      <span>开票未回：{formatCurrency(invoiceGap)}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white">工程关联</h4>
+                    <div className="mt-4 space-y-2 text-xs font-bold text-slate-500">
+                      <p>工程 ID：{selectedPayment.projectId || project?.id || '未关联'}</p>
+                      <p>工程名称：{project?.name || selectedPayment.projectName}</p>
+                      <p>客户单位：{project?.clientName || '-'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white">支付条款</h4>
+                  <p className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm font-bold leading-7 text-slate-700 dark:bg-slate-950 dark:text-slate-200">{selectedPayment.paymentTerms || '未录入支付条款'}</p>
+                </div>
+
+                <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white">关联发票档案</h4>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black text-slate-500 dark:bg-slate-800">{invoiceArchives.length} 份</span>
+                  </div>
+                  {invoiceArchives.length > 0 ? (
+                    <div className="space-y-2">
+                      {invoiceArchives.map(archive => (
+                        <div key={archive.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black text-slate-900 dark:text-white">{archive.title}</p>
+                            <p className="mt-1 text-[10px] font-bold text-slate-500">{archive.projectName} · {archive.fileType} · {archive.uploadDate?.split('T')[0] || '-'}</p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <button onClick={() => setInvoicePreviewItem(archive)} className="rounded-xl bg-primary-600 px-4 py-2 text-[10px] font-black text-white hover:bg-primary-700">预览</button>
+                            <a href={getArchiveDownloadUrl(archive.url)} download className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-black text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">下载</a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-orange-200 bg-orange-50 p-4 text-sm font-bold text-orange-700 dark:border-orange-900 dark:bg-orange-950/20 dark:text-orange-300">
+                      没有匹配到发票档案。请在工程档案中把发票资料类别设为“财务发票”，并关联到该工程项目。
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3">
+                  {canAdd && (currentUser.role === 'Admin' || selectedPayment.managerName === currentUser.nickname || selectedPayment.creatorId === currentUser.id) && (
+                    <button onClick={() => { handleOpenEdit(selectedPayment); setSelectedPayment(null); }} className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-xs font-black text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                      编辑回款
+                    </button>
+                  )}
+                  <button onClick={() => setSelectedPayment(null)} className="rounded-2xl bg-primary-600 px-6 py-3 text-xs font-black text-white hover:bg-primary-700">关闭详情</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {invoicePreviewItem && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md">
           <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl dark:bg-slate-800">
@@ -555,9 +721,9 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
                 <button onClick={() => setInvoicePreviewItem(null)} className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
               </div>
             </div>
-            <div className="flex-1 bg-slate-100 p-5 dark:bg-slate-950">
+            <div className="min-h-0 flex-1 bg-slate-100 p-2 dark:bg-slate-950 sm:p-5">
               {invoicePreviewItem.url && invoicePreviewItem.fileType === 'PDF' ? (
-                <iframe src={invoicePreviewItem.url} title="Invoice Preview" className="h-full w-full rounded-2xl border-0 bg-white shadow-xl" />
+                <React.Suspense fallback={<div className="flex h-full items-center justify-center text-sm font-black text-slate-500">正在启动 PDF 查看器…</div>}><PdfPreview src={invoicePreviewItem.url} title={invoicePreviewItem.title} /></React.Suspense>
               ) : invoicePreviewItem.url && ['JPG', 'JPEG', 'PNG', 'GIF'].includes(invoicePreviewItem.fileType) ? (
                 <img src={invoicePreviewItem.url} alt={invoicePreviewItem.title} className="mx-auto h-full max-w-full rounded-2xl object-contain shadow-xl" />
               ) : (

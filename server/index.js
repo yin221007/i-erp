@@ -31,7 +31,9 @@ export async function startServer(environment = process.env) {
   const server = app.listen(config.port, () => {
     console.log(`i ERP Server running on port ${config.port}`);
   });
-  server.timeout = 3_600_000;
+  // Nginx 的业务请求上限为 120 秒；后端仅留少量收尾余量，避免异常连接
+  // 长时间占用工作进程和数据库连接。
+  server.timeout = 180_000;
   return { app, pool, server };
 }
 

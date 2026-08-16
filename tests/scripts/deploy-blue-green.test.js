@@ -12,6 +12,7 @@ const restoreDrillUrl = new URL(
   '../../scripts/restore-drill.sh',
   import.meta.url
 );
+const deployLibUrl = new URL('../../scripts/deploy-lib.sh', import.meta.url);
 
 test('deployment gates clone rehearsal, snapshot, cutover, and auto rollback', async () => {
   const source = await readFile(deployUrl, 'utf8');
@@ -53,7 +54,30 @@ test('rollback verifies a named snapshot before restoring data and old stack', a
   assert.ok(restoreUploads > restoreDatabase);
   assert.ok(startOld > restoreUploads);
   assert.match(source, /ROLLBACK_CONFIRMATION/);
+  assert.match(source, /OLD_ENV_FILE/);
+  assert.match(source, /compose_with_clean_env_file/);
+  assert.match(source, /GREEN_DB_NAME="\$DB_NAME"/);
+  assert.match(source, /GREEN_UPLOADS_PATH="\$UPLOADS_PATH"/);
+  assert.match(
+    source,
+    /GREEN_MAINTENANCE_QUEUE_PATH="\$MAINTENANCE_QUEUE_PATH"/
+  );
   assert.doesNotMatch(source, /lucky.*(?:api|token)/i);
+});
+
+test('deployment restarts the preserved stack with its own pinned environment', async () => {
+  const [deploySource, rollbackSource] = await Promise.all([
+    readFile(deployUrl, 'utf8'),
+    readFile(rollbackUrl, 'utf8')
+  ]);
+
+  for (const source of [deploySource, rollbackSource]) {
+    assert.match(source, /OLD_ENV_FILE/);
+    assert.match(source, /compose_with_clean_env_file/);
+    assert.match(source, /Old environment file does not exist/);
+    assert.match(source, /GREEN_DB_NAME="\$DB_NAME"/);
+    assert.match(source, /GREEN_UPLOADS_PATH="\$UPLOADS_PATH"/);
+  }
 });
 
 test('restore drill records a manifest-bound success marker', async () => {
@@ -62,6 +86,43 @@ test('restore drill records a manifest-bound success marker', async () => {
   assert.match(source, /restore-drill\.ok/);
   assert.match(source, /manifest_sha256/);
   assert.match(source, /status=success/);
+});
+
+test('deployment upload comparisons ignore resumable uploads and thumbnails', async () => {
+  const source = await readFile(deployLibUrl, 'utf8');
+
+  assert.match(source, /-path "\$uploads_dir\/\.ierp-upload-chunks"/);
+  assert.match(source, /-path "\$uploads_dir\/\.ierp-thumbnails"/);
+});
+
+test('table comparisons require explicit, validated migration deltas', async () => {
+  const source = await readFile(deployLibUrl, 'utf8');
+
+  assert.match(source, /EXPECTED_TABLE_COUNT_DELTAS/);
+  assert.match(
+    source,
+    /\^\(\[A-Za-z0-9_\]\+\)=\(-\?\[0-9\]\+\)\$/
+  );
+  assert.match(source, /Duplicate expected table count delta/);
+  assert.match(source, /expected_count \+ expected_delta/);
+  assert.match(source, /Expected table count for \$table_name cannot be negative/);
+  assert.doesNotMatch(source, /actual_count" -g[et]/);
+});
+
+test('migration table deltas accept a validated negative count', () => {
+  const script = `
+    set -Eeuo pipefail
+    source "${deployLibUrl.pathname}"
+    EXPECTED_TABLE_COUNT_DELTAS="approvals=1,recycle_bin=-1,schema_migrations=1"
+    test "$(expected_table_count_delta approvals)" = "1"
+    test "$(expected_table_count_delta recycle_bin)" = "-1"
+    test "$(expected_table_count_delta unknown_table)" = "0"
+  `;
+  const result = spawnSync('/bin/bash', ['-c', script], {
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('deployment isolates clone jobs and wires production to the supervised queue', async () => {

@@ -32,6 +32,10 @@ function isAdministrator(user) {
   return user?.isDefaultAdmin === true || user?.role === 'Admin';
 }
 
+function isDefaultAdministrator(user) {
+  return user?.isDefaultAdmin === true;
+}
+
 function isExecutive(user) {
   return EXECUTIVE_DEPARTMENTS.has(user?.department || '');
 }
@@ -110,12 +114,18 @@ function canWriteClientRecord(user, record, context) {
 function getProjectByRecord(record, context) {
   if (!record) return null;
   const projects = contextProjects(context);
-  return projects.find(project => {
-    if (record.projectId && project.id === record.projectId) return true;
-    if (record.id && project.id === record.id && record.items) return true;
-    if (record.projectName && project.name === record.projectName) return true;
-    return false;
-  }) || null;
+  // 显式 projectId 是工程关联的权威字段；一旦存在，禁止再用路由 ID
+  // 或可伪造的工程名称兜底，否则更新生产记录时可能绕过目标工程权限。
+  if (record.projectId) {
+    return projects.find(project => project.id === record.projectId) || null;
+  }
+  if (record.id && record.items) {
+    return projects.find(project => project.id === record.id) || null;
+  }
+  if (record.projectName) {
+    return projects.find(project => project.name === record.projectName) || null;
+  }
+  return null;
 }
 
 function canSeeProject(user, project, context) {
@@ -233,7 +243,8 @@ function canApplicantUpdateApproval(user, nextRecord, previousRecord) {
   if (!['Draft', 'Pending'].includes(nextRecord.status)) return false;
   const immutableKeys = [
     'id', 'applicantId', 'applicantName', 'department',
-    'createdAt', 'relatedId', 'relatedType'
+    'createdAt', 'relatedId', 'relatedType',
+    'actionExecutionStatus', 'actionExecutedAt', 'actionExecutionError'
   ];
   if (immutableKeys.some(key => !sameJson(previousRecord[key], nextRecord?.[key]))) return false;
   if (!isCleanApprovalSubmission(nextRecord)) return false;
@@ -247,7 +258,8 @@ function canApproverAuditApproval(user, nextRecord, previousRecord) {
   const immutableKeys = [
     'id', 'title', 'type', 'applicantId', 'applicantName', 'department',
     'strategy', 'approverIds', 'approverNamesDisplay', 'currentContent',
-    'currentAttachments', 'createdAt', 'relatedId', 'relatedType'
+    'currentAttachments', 'createdAt', 'relatedId', 'relatedType',
+    'actionExecutionStatus', 'actionExecutedAt', 'actionExecutionError'
   ];
   if (immutableKeys.some(key => !sameJson(previousRecord[key], nextRecord?.[key]))) return false;
 
@@ -296,6 +308,14 @@ export function getResourcePolicy(resource) {
 export function canWriteResource(resource, user, record, context = {}) {
   const definition = getResourceDefinition(resource);
   if (!definition || !user) return false;
+  if (resource === 'users') {
+    if (!isDefaultAdministrator(user)) return false;
+    if (context?.action === 'create') return record?.isDefaultAdmin !== true;
+    if (context?.action === 'delete') {
+      return record?.isDefaultAdmin !== true && record?.id !== user.id;
+    }
+    return true;
+  }
   if (isAdministrator(user)) return true;
   if (definition.write === 'admin') return false;
   if (definition.write === 'owner') return isOwnedRecord(resource, user, record);
@@ -324,7 +344,14 @@ export function canWriteResource(resource, user, record, context = {}) {
   }
 
   if (resource === 'production') {
-    if (!hasReadWrite(user) || !PRODUCTION_WRITE_DEPARTMENTS.has(user.department)) return false;
+    if (!hasReadWrite(user)) return false;
+
+    const project = getProjectByRecord(record, context);
+    // 销售部 Manager 同时承担项目经理职责时，只允许维护本人负责的工程。
+    // 这里必须依赖服务端查询到的真实工程，不信任请求体伪造的 manager 字段。
+    if (project?.manager === user.nickname) return true;
+
+    if (!PRODUCTION_WRITE_DEPARTMENTS.has(user.department)) return false;
     return isExecutive(user) || canSeeProjectRecord(user, record, context);
   }
 
@@ -357,11 +384,16 @@ export function canUpdateResource(resource, user, nextRecord, previousRecord, co
   if (resource === 'approvals') {
     return canUpdateApprovalRecord(user, nextRecord, previousRecord);
   }
-  if (OWNER_SCOPED_RESOURCES.has(resource)) {
-    if (previousRecord && !sameJson(previousRecord.creatorId ?? null, nextRecord?.creatorId ?? null)) return false;
-    return canWriteResource(resource, user, previousRecord || nextRecord, { ...context, action: 'update' });
+  if (!previousRecord) return false;
+  if (resource === 'users') {
+    if (previousRecord.isDefaultAdmin !== nextRecord?.isDefaultAdmin) return false;
+    if (previousRecord.isDefaultAdmin === true && nextRecord?.role !== 'Admin') return false;
   }
-  return canWriteResource(resource, user, nextRecord, { ...context, action: 'update' });
+  if (OWNER_SCOPED_RESOURCES.has(resource)) {
+    if (!sameJson(previousRecord.creatorId ?? null, nextRecord?.creatorId ?? null)) return false;
+  }
+  return canWriteResource(resource, user, previousRecord, { ...context, action: 'update' }) &&
+    canWriteResource(resource, user, nextRecord, { ...context, action: 'update' });
 }
 
 export function filterReadableRecords(resource, user, records, context = {}) {

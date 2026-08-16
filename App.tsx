@@ -20,7 +20,8 @@ import {
   Project, Client, Equipment, Contact, ArchiveItem, ProjectProduction, User, 
   WorkflowNode, AppSettings, DocItem, Notification as AppNotification, 
   NotificationType, ScheduleItem, PaymentRecord, Approval, WorkLogEntry, 
-  ChatMessage, ChatChannel, TaskStatus, NotificationCategory, UserPreferences, ChatAnnouncement, RecycleBinItem 
+  ChatMessage, ChatChannel, TaskStatus, NotificationCategory, UserPreferences,
+  ChatAnnouncement, RecycleBinItem, Attachment
 } from './types';
 import React, {
   lazy,
@@ -35,13 +36,20 @@ import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import NotificationToast from './components/NotificationToast';
 import Login from './components/Login';
-import { normalizeProductionRecord } from './lib/production-records.js';
+import {
+  getProductionWriteRequest,
+  normalizeProductionRecord
+} from './lib/production-records.js';
 import {
   API_URL,
   apiFetch,
   apiJson,
   setUnauthorizedHandler
 } from './lib/api';
+import {
+  getPollPlan,
+  POLL_TICK_MILLISECONDS
+} from './lib/polling.js';
 
 const ProjectList = lazy(() => import('./components/ProjectList'));
 const ProjectWorkflow = lazy(() => import('./components/ProjectWorkflow'));
@@ -106,29 +114,11 @@ function App() {
   // ==================================================================================
   // 2. DATA STATE MANAGEMENT
   // ==================================================================================
-  const [users, setUsers] = useState<User[]>(() => {
-      const saved = localStorage.getItem('ierp_users');
-      if (saved) {
-          try { return JSON.parse(saved); } catch(e) {}
-      }
-      return INITIAL_USERS;
-  });
-  const [projects, setProjects] = useState<Project[]>(() => {
-      const saved = localStorage.getItem('ierp_projects');
-      if (saved) {
-          try { return JSON.parse(saved); } catch(e) {}
-      }
-      return INITIAL_PROJECTS;
-  });
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
   
-  const [clients, setClients] = useState<Client[]>(() => {
-      const saved = localStorage.getItem('ierp_clients');
-      return saved ? JSON.parse(saved) : [];
-  });
-  const [equipment, setEquipment] = useState<Equipment[]>(() => {
-      const saved = localStorage.getItem('ierp_equipment');
-      return saved ? JSON.parse(saved) : [];
-  });
+  const [clients, setClients] = useState<Client[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [archives, setArchives] = useState<ArchiveItem[]>([]);
@@ -147,13 +137,7 @@ function App() {
   const [aiMessages, setAiMessages] = useState<any[]>([]);
   const [sessionAnnouncementsRead, setSessionAnnouncementsRead] = useState<boolean>(false);
 
-  const [appSettings, setAppSettings] = useState<AppSettings>(() => {
-      const saved = localStorage.getItem('ierp_settings');
-      if (saved) {
-        try { return JSON.parse(saved); } catch(e) {}
-      }
-      return INITIAL_SETTINGS;
-  });
+  const [appSettings, setAppSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const displayLogoUrl = useMemo(
     () => appSettings.logoUrl?.startsWith('/api/uploads/')
       ? `${API_URL}/branding/logo`
@@ -170,18 +154,36 @@ function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const lastNotificationRef = useRef<{ id: string, time: number }>({ id: '', time: 0 });
   const lastNotifiedMessageIdRef = useRef<string>('');
+  const deletionApprovalExecutionRef = useRef<Set<string>>(new Set());
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User>(INITIAL_USERS[0]);
   
-  const stateRef = useRef({ currentUser, activeView, activeChannelId });
+  const stateRef = useRef({
+    currentUser,
+    activeView,
+    activeChannelId,
+    isSettingsOpen
+  });
   useEffect(() => {
-    stateRef.current = { currentUser, activeView, activeChannelId };
-  }, [currentUser, activeView, activeChannelId]);
+    stateRef.current = {
+      currentUser,
+      activeView,
+      activeChannelId,
+      isSettingsOpen
+    };
+  }, [currentUser, activeView, activeChannelId, isSettingsOpen]);
 
   // ==================================================================================
   // 3. EFFECTS & INITIALIZATION
   // ==================================================================================
+
+  useEffect(() => {
+      // 旧版本曾缓存业务数据；升级后立即清除，仅保留界面偏好。
+      for (const key of ['users', 'projects', 'clients', 'equipment', 'settings']) {
+          localStorage.removeItem(`ierp_${key}`);
+      }
+  }, []);
 
   useEffect(() => {
       localStorage.setItem('ierp_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
@@ -226,7 +228,7 @@ function App() {
       if (!isAuthenticated || connectionStatus !== 'connected') return;
       const interval = setInterval(() => {
           pollUpdates();
-      }, 5000); 
+      }, POLL_TICK_MILLISECONDS);
       return () => clearInterval(interval);
   }, [isAuthenticated, connectionStatus]);
 
@@ -280,59 +282,108 @@ function App() {
   }, [activeView, announcements.length, isAuthenticated]);
 
   useEffect(() => {
-      const approvedDeletionRequests = approvals.filter(a => a.type === 'Deletion' && a.status === 'Approved' && a.relatedId);
-      approvedDeletionRequests.forEach(async (req) => {
+      // 删除审批只能由超级管理员执行；申请人查看记录不能触发业务删除。
+      if (!currentUser.isDefaultAdmin) return;
+      const approvedDeletionRequests = approvals.filter(a =>
+        a.type === 'Deletion' &&
+        a.status === 'Approved' &&
+        a.relatedId &&
+        !a.actionExecutionStatus
+      );
+      approvedDeletionRequests.forEach(req => {
+        if (deletionApprovalExecutionRef.current.has(req.id)) return;
+        deletionApprovalExecutionRef.current.add(req.id);
+        void (async () => {
           try {
-              if (req.relatedType === 'Project') {
+              const relatedResource = String(req.relatedType || '').toLowerCase();
+              if (['project', 'projects'].includes(relatedResource)) {
                   setProjects(prev => prev.filter(p => p.id !== req.relatedId));
                   await syncToBackend('projects', 'DELETE', {}, req.relatedId);
-              } else if (req.relatedType === 'Archive') {
-                  // 这里复用核心同步删除逻辑
-                  handleDeleteArchive(req.relatedId!);
-              } else if (req.relatedType === 'Client') {
+              } else if (['archive', 'archives'].includes(relatedResource)) {
+                  await executeArchiveDeletion(req.relatedId!, undefined, true);
+              } else if (['client', 'clients'].includes(relatedResource)) {
                   setClients(prev => prev.filter(c => c.id !== req.relatedId));
                   await syncToBackend('clients', 'DELETE', {}, req.relatedId);
-              } else if (req.relatedType === 'Equipment') {
+              } else if (['equipment'].includes(relatedResource)) {
                   setEquipment(prev => prev.filter(e => e.id !== req.relatedId));
                   await syncToBackend('equipment', 'DELETE', {}, req.relatedId);
-              } else if (req.relatedType === 'Payment') {
+              } else if (['payment', 'payments'].includes(relatedResource)) {
                   setPaymentRecords(prev => prev.filter(p => p.id !== req.relatedId));
                   await syncToBackend('payments', 'DELETE', {}, req.relatedId);
-              } else if (req.relatedType === 'WorkLog') {
+              } else if (['worklog', 'worklogs'].includes(relatedResource)) {
                   setWorkLogs(prev => prev.filter(l => l.id !== req.relatedId));
                   await syncToBackend('worklogs', 'DELETE', {}, req.relatedId);
-              } else if (req.relatedType === 'Doc') {
+              } else if (['doc', 'docs'].includes(relatedResource)) {
                   setDocs(prev => prev.filter(d => d.id !== req.relatedId));
                   await syncToBackend('docs', 'DELETE', {}, req.relatedId);
+              } else if (['schedule'].includes(relatedResource)) {
+                  setSchedule(prev => prev.filter(item => item.id !== req.relatedId));
+                  await syncToBackend('schedule', 'DELETE', {}, req.relatedId);
+              } else if (['production'].includes(relatedResource)) {
+                  setProductionData(prev => prev.filter(item => item.id !== req.relatedId));
+                  await syncToBackend('production', 'DELETE', {}, req.relatedId);
+              } else {
+                  throw new Error(`Unsupported deletion resource: ${req.relatedType}`);
               }
-              onDeleteApproval(req.id);
+              const executedAt = new Date().toISOString();
+              const completedApproval: Approval = {
+                ...req,
+                actionExecutionStatus: 'Completed',
+                actionExecutedAt: executedAt,
+                actionExecutionError: undefined,
+                updatedAt: executedAt
+              };
+              const response = await syncToBackend(
+                'approvals',
+                'PUT',
+                completedApproval,
+                completedApproval.id
+              );
+              const savedApproval = await response.json() as Approval;
+              setApprovals(previous => previous.map(item =>
+                item.id === savedApproval.id ? savedApproval : item
+              ));
               notify(`批准删除成功：${req.title}`, 'success');
-              fetchData();
-          } catch (e) {
-              console.error("Auto delete error", e);
+              void fetchData();
+          } catch (error) {
+              console.error("Auto delete error", error);
+              const failedAt = new Date().toISOString();
+              const failedApproval: Approval = {
+                ...req,
+                actionExecutionStatus: 'Failed',
+                actionExecutionError: '关联业务删除执行失败，请管理员检查后重试',
+                updatedAt: failedAt
+              };
+              try {
+                const response = await syncToBackend(
+                  'approvals',
+                  'PUT',
+                  failedApproval,
+                  failedApproval.id
+                );
+                const savedApproval = await response.json() as Approval;
+                setApprovals(previous => previous.map(item =>
+                  item.id === savedApproval.id ? savedApproval : item
+                ));
+              } catch {
+                void fetchData();
+              }
+              notify(
+                `审批已保留，但关联删除执行失败：${req.title}`,
+                'error',
+                undefined,
+                'System'
+              );
+          } finally {
+              deletionApprovalExecutionRef.current.delete(req.id);
           }
+        })();
       });
-  }, [approvals]);
+  }, [approvals, currentUser.isDefaultAdmin]);
 
   // ==================================================================================
   // 4. HELPER FUNCTIONS
   // ==================================================================================
-
-  const loadLocal = <T,>(key: string, initial: T): T => {
-    const saved = localStorage.getItem(`ierp_${key}`);
-    if (saved) {
-        try { return JSON.parse(saved); } catch(e) { console.error("LS Parse Error", e); }
-    }
-    return initial;
-  };
-
-  const saveToLocal = (key: string, data: any) => {
-    try {
-        localStorage.setItem(`ierp_${key}`, JSON.stringify(data));
-    } catch (e) {
-        console.warn(`LocalStorage write failed for ${key}`);
-    }
-  };
 
   const safeJson = async (response: Response) => {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -449,6 +500,7 @@ function App() {
           if (window.confirm(`该数据已超过 24 小时保护期。为了保障工程数据安全性，删除该项需要向超级管理员提出申请。是否立即发起删除申请？`)) {
               const superAdmin = users.find(u => u.isDefaultAdmin);
               const nowISO = new Date().toISOString();
+              const approvalContent = `申请删除类型为 ${resourceType} 的项目：${itemName} (ID: ${item.id})。申请人：${currentUser.nickname}。`;
               const newApproval: Approval = {
                   id: Math.random().toString(36).substr(2, 9),
                   title: `[删除申请] ${itemName}`,
@@ -462,16 +514,24 @@ function App() {
                   approverNamesDisplay: superAdmin?.nickname || '超级管理员',
 
                   status: 'Pending',
-                  currentContent: `申请删除类型为 ${resourceType} 的项目：${itemName} (ID: ${item.id})。申请人：${currentUser.nickname}。`,
+                  currentContent: approvalContent,
                   currentAttachments: [],
-                  versions: [],
+                  versions: [{
+                    version: 1,
+                    content: approvalContent,
+                    attachments: [],
+                    submittedAt: nowISO,
+                    outcomes: []
+                  }],
                   createdAt: nowISO,
                   updatedAt: nowISO,
                   relatedId: item.id,
                   relatedType: resourceType
               };
-              handleAddApproval(newApproval);
-              notify('删除申请已提交', 'info', '申请已发送至超级管理员，获批后系统将自动执行删除。', 'Approval');
+              const created = await handleAddApproval(newApproval);
+              if (created) {
+                notify('删除申请已提交', 'info', '申请已发送至超级管理员，获批后系统将自动执行删除。', 'Approval');
+              }
           }
       }
   };
@@ -521,14 +581,17 @@ function App() {
                 }
                 return p;
             });
-            setProjects(processedProjects); 
-            saveToLocal('projects', processedProjects);
+            setProjects(processedProjects);
+            setSelectedProject(current =>
+              current
+                ? processedProjects.find(project => project.id === current.id) || null
+                : null
+            );
         }
         
         let loadedUsers = await getJson(responses[7]);
         if (Array.isArray(loadedUsers) && loadedUsers.length > 0) {
             setUsers(loadedUsers);
-            saveToLocal('users', loadedUsers);
             const self = loadedUsers.find((user: User) =>
               user.id === authenticatedUserId
             );
@@ -549,10 +612,10 @@ function App() {
         }
         
         const loadedClients = await getJson(responses[1]);
-        if (loadedClients) { setClients(loadedClients); saveToLocal('clients', loadedClients); }
+        if (loadedClients) setClients(loadedClients);
 
         const loadedEquipment = await getJson(responses[2]);
-        if (loadedEquipment) { setEquipment(loadedEquipment); saveToLocal('equipment', loadedEquipment); }
+        if (loadedEquipment) setEquipment(loadedEquipment);
 
         const loadedSchedule = await getJson(responses[3]);
         if (loadedSchedule) setSchedule(loadedSchedule);
@@ -572,7 +635,6 @@ function App() {
         if (Array.isArray(settingsData) && settingsData.length > 0) {
             const globalSettings = settingsData.find((s: AppSettings) => s.id === 'global_config') || settingsData[0];
             setAppSettings({ ...globalSettings, id: 'global_config' }); 
-            saveToLocal('settings', globalSettings);
         }
 
         const loadedPayments = await getJson(responses[9]);
@@ -609,13 +671,35 @@ function App() {
   };
 
   const lastHeartbeatRef = useRef<number>(0);
+  const lastViewPollRef = useRef<number>(0);
+  const lastGlobalPollRef = useRef<number>(0);
+  const pollInFlightRef = useRef<boolean>(false);
 
   const pollUpdates = async () => {
-      const { currentUser: currentU } = stateRef.current;
-      if (connectionStatus !== 'connected' || !isAuthenticated) return;
+      const {
+          currentUser: currentU,
+          activeView: currentActiveView,
+          isSettingsOpen: settingsOpen
+      } = stateRef.current;
+      if (
+          connectionStatus !== 'connected' ||
+          !isAuthenticated ||
+          document.visibilityState !== 'visible' ||
+          pollInFlightRef.current
+      ) return;
       
       try {
           const now = Date.now();
+          const pollPlan = getPollPlan({
+              activeView: currentActiveView,
+              isSettingsOpen: settingsOpen,
+              now,
+              lastViewPollAt: lastViewPollRef.current,
+              lastGlobalPollAt: lastGlobalPollRef.current
+          });
+          lastViewPollRef.current = pollPlan.nextViewPollAt;
+          lastGlobalPollRef.current = pollPlan.nextGlobalPollAt;
+
           if (now - lastHeartbeatRef.current > 45000) {
               lastHeartbeatRef.current = now;
               apiFetch(`${API_URL}/auth/heartbeat`, {
@@ -625,69 +709,79 @@ function App() {
               });
           }
 
-          const usersRes = await apiFetch(`${API_URL}/users`);
-          if (usersRes.ok) {
-              let serverUsers = await safeJson(usersRes);
-              if (Array.isArray(serverUsers) && serverUsers.length > 0) {
-                  setUsers(serverUsers);
-                  saveToLocal('users', serverUsers);
-                  const self = serverUsers.find((u: User) => u.id === currentU.id);
-                  if (self && JSON.stringify(self) !== JSON.stringify(currentU)) {
-                      setCurrentUser(self);
+          if (pollPlan.resources.length === 0) return;
+          pollInFlightRef.current = true;
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
+          try {
+              const responses = await Promise.all(
+                  pollPlan.resources.map(async resource => ({
+                      resource,
+                      response: await apiFetch(`${API_URL}/${resource}`, {
+                          signal: controller.signal
+                      })
+                  }))
+              );
+
+              for (const { resource, response } of responses) {
+                  if (!response.ok) continue;
+                  const data = await safeJson(response);
+                  if (!Array.isArray(data)) continue;
+
+                  switch (resource) {
+                      case 'users': {
+                          if (data.length === 0) break;
+                          setUsers(data);
+                          const self = data.find((user: User) => user.id === currentU.id);
+                          if (self && JSON.stringify(self) !== JSON.stringify(currentU)) {
+                              setCurrentUser(self);
+                          }
+                          break;
+                      }
+                      case 'projects':
+                          setProjects(data);
+                          setSelectedProject(current =>
+                              current
+                                  ? data.find(project => project.id === current.id) || null
+                                  : null
+                          );
+                          break;
+                      case 'clients': setClients(data); break;
+                      case 'equipment': setEquipment(data); break;
+                      case 'schedule': setSchedule(data); break;
+                      case 'docs': setDocs(data); break;
+                      case 'archives': setArchives(data); break;
+                      case 'production':
+                          setProductionData(data.map(normalizeProductionRecord));
+                          break;
+                      case 'settings': {
+                          const globalSettings = data.find(
+                              (setting: AppSettings) => setting.id === 'global_config'
+                          ) || data[0];
+                          if (globalSettings) {
+                              setAppSettings({ ...globalSettings, id: 'global_config' });
+                          }
+                          break;
+                      }
+                      case 'payments': setPaymentRecords(data); break;
+                      case 'approvals': setApprovals(data); break;
+                      case 'worklogs': setWorkLogs(data); break;
+                      case 'messages': setMessages(data); break;
+                      case 'channels': setChannels(data); break;
+                      case 'announcements': setAnnouncements(data); break;
+                      case 'ai_messages': setAiMessages(data); break;
+                      case 'recycle_bin': setRecycleBin(data); break;
                   }
               }
+          } finally {
+              window.clearTimeout(timeoutId);
+              pollInFlightRef.current = false;
           }
-
-          const msgRes = await apiFetch(`${API_URL}/messages`);
-          if (msgRes.ok) {
-              const serverMessages = await safeJson(msgRes);
-              if (Array.isArray(serverMessages)) setMessages(serverMessages);
+      } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+              console.debug('Incremental sync skipped');
           }
-          
-          const [channelRes, annRes, workLogRes, paymentRes, approvalRes, projRes, aiRes, recycleRes] = await Promise.all([
-              apiFetch(`${API_URL}/channels`),
-              apiFetch(`${API_URL}/announcements`),
-              apiFetch(`${API_URL}/worklogs`),
-              apiFetch(`${API_URL}/payments`),
-              apiFetch(`${API_URL}/approvals`),
-              apiFetch(`${API_URL}/projects`),
-              apiFetch(`${API_URL}/ai_messages`),
-              apiFetch(`${API_URL}/recycle_bin`)
-          ]);
-
-          if (channelRes.ok) {
-              const data = await safeJson(channelRes);
-              if (Array.isArray(data)) setChannels(data);
-          }
-          if (annRes.ok) {
-              const data = await safeJson(annRes);
-              if (Array.isArray(data)) setAnnouncements(data);
-          }
-          if (workLogRes.ok) {
-              const data = await safeJson(workLogRes);
-              if (Array.isArray(data)) setWorkLogs(data);
-          }
-          if (paymentRes.ok) {
-              const data = await safeJson(paymentRes);
-              if (Array.isArray(data)) setPaymentRecords(data);
-          }
-          if (approvalRes.ok) {
-              const data = await safeJson(approvalRes);
-              if (Array.isArray(data)) setApprovals(data);
-          }
-          if (projRes.ok) {
-              const data = await safeJson(projRes);
-              if (Array.isArray(data)) setProjects(data);
-          }
-          if (aiRes.ok) {
-              const data = await safeJson(aiRes);
-              if (Array.isArray(data)) setAiMessages(data);
-          }
-          if (recycleRes.ok) {
-              const data = await safeJson(recycleRes);
-              if (Array.isArray(data)) setRecycleBin(data);
-          }
-      } catch (e) { }
+      }
   };
 
   // ==================================================================================
@@ -700,7 +794,11 @@ function App() {
       try { 
           await syncToBackend('projects', 'PUT', updatedProject, updatedProject.id); 
           notify('项目更新成功', 'success'); 
-      } catch (e) { rollbackAfterSyncFailure('项目更新失败，已恢复服务器最新数据'); }
+          return true;
+      } catch (e) {
+          rollbackAfterSyncFailure('项目更新失败，已恢复服务器最新数据');
+          return false;
+      }
   };
   
   const handleAddProject = async (projectPart: Partial<Project>) => {
@@ -741,30 +839,40 @@ function App() {
       });
   };
 
-  const handleUpdateWorkflowNode = (updatedNode: WorkflowNode) => {
-      if(!selectedProject) return;
+  const handleUpdateWorkflowNode = async (updatedNode: WorkflowNode) => {
+      if(!selectedProject) return false;
       const newNodes = selectedProject.nodes.map(n => n.id === updatedNode.id ? updatedNode : n);
       const completedCount = newNodes.filter(n => n.status === 'COMPLETED').length;
       const totalCount = newNodes.length;
       const newProgress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-      handleUpdateProject({ ...selectedProject, nodes: newNodes, progress: newProgress });
+      return handleUpdateProject({ ...selectedProject, nodes: newNodes, progress: newProgress });
   };
 
   const handleAddUser = async (user: User) => {
-      setUsers(prev => [...prev, user]);
-      try { 
-          await syncToBackend('users', 'POST', user); 
-          notify('用户创建成功', 'success'); 
-      } catch (e) { rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据'); }
+      try {
+          const response = await syncToBackend('users', 'POST', user);
+          const savedUser = await response.json() as User;
+          setUsers(prev => [...prev, savedUser]);
+          notify('用户创建成功', 'success');
+          return true;
+      } catch (e) {
+          rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据');
+          return false;
+      }
   };
 
   const handleUpdateUser = async (user: User) => {
-      setUsers(prev => prev.map(u => u.id === user.id ? user : u));
-      if (currentUser.id === user.id) setCurrentUser(user);
-      try { 
-          await syncToBackend('users', 'PUT', user, user.id); 
-          notify('用户资料已更新', 'success'); 
-      } catch (e) { rollbackAfterSyncFailure('用户资料更新失败，已恢复服务器最新数据'); }
+      try {
+          const response = await syncToBackend('users', 'PUT', user, user.id);
+          const savedUser = await response.json() as User;
+          setUsers(prev => prev.map(existing => existing.id === user.id ? savedUser : existing));
+          if (currentUser.id === user.id) setCurrentUser(savedUser);
+          notify('用户资料已更新', 'success');
+          return true;
+      } catch (e) {
+          rollbackAfterSyncFailure('用户资料更新失败，已恢复服务器最新数据');
+          return false;
+      }
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -822,54 +930,218 @@ function App() {
       });
   };
 
-  const handleAddArchive = (archive: ArchiveItem) => {
+  const handleAddArchive = async (archive: ArchiveItem) => {
       const newArc = { ...archive, createdAt: new Date().toISOString() };
-      setArchives(p => [...p, newArc]);
-      void syncToBackendOrRollback('archives', 'POST', newArc, undefined, '档案创建失败，已恢复服务器最新数据');
+      const saved = await syncToBackendOrRollback(
+          'archives',
+          'POST',
+          newArc,
+          undefined,
+          '档案创建失败，已恢复服务器最新数据'
+      );
+      if (saved) setArchives(p => [...p, newArc]);
+      return saved;
   };
 
-  const handleUpdateArchive = (updatedArchive: ArchiveItem) => {
-      setArchives(prev => prev.map(a => a.id === updatedArchive.id ? updatedArchive : a));
-      void syncToBackendOrRollback('archives', 'PUT', updatedArchive, updatedArchive.id, '档案更新失败，已恢复服务器最新数据');
-  };
-
-  const handleDeleteArchive = (id: string) => {
-      const arc = archives.find(a => a.id === id);
-      if (!arc) return;
-      handleProtectedDelete(arc, 'archives', arc.title, async (id) => {
-          // 核心同步逻辑：1. 从全局档案列表中删除
-          setArchives(p => p.filter(a => a.id !== id));
-          
-          // 2. 深度同步：遍历所有项目，从每一个任务节点的附件中移除该文件的引用
-          setProjects(prevProjects => {
-              const updatedProjects = prevProjects.map(project => {
-                  let hasChanges = false;
-                  const updatedNodes = project.nodes.map(node => {
-                      const filteredAttachments = node.attachments.filter(att => att.id !== id);
-                      if (filteredAttachments.length !== node.attachments.length) {
-                          hasChanges = true;
-                          return { ...node, attachments: filteredAttachments };
-                      }
-                      return node;
-                  });
-                  
-                  if (hasChanges) {
-                      // 如果项目发生了变化，异步推送到后端
-                      const updatedProject = { ...project, nodes: updatedNodes };
-                      void syncToBackendOrRollback('projects', 'PUT', updatedProject, updatedProject.id, '项目附件同步失败，已恢复服务器最新数据');
-                      return updatedProject;
-                  }
-                  return project;
-              });
-              return updatedProjects;
+  const handleAddArchives = async (newArchives: ArchiveItem[]) => {
+      if (newArchives.length === 0) return true;
+      try {
+          const response = await apiFetch(`${API_URL}/archives/batch`, {
+              method: 'POST',
+              json: newArchives.map(archive => ({
+                  ...archive,
+                  createdAt: archive.createdAt || new Date().toISOString()
+              }))
           });
+          if (!response.ok) {
+              const error = await response.json().catch(() => ({}));
+              throw new Error(error?.error || '档案批量保存失败');
+          }
+          const savedArchives = await response.json() as ArchiveItem[];
+          setArchives(previous => [...previous, ...savedArchives]);
+          return true;
+      } catch (error) {
+          notify(
+              error instanceof Error ? error.message : '档案批量保存失败',
+              'error',
+              undefined,
+              'System'
+          );
+          fetchData();
+          return false;
+      }
+  };
 
-          // 3. 同步至后端档案库
+  const handleRenameArchive = async (id: string, title: string) => {
+      try {
+          const response = await apiFetch(`${API_URL}/archives/${encodeURIComponent(id)}/name`, {
+              method: 'PATCH',
+              json: { title }
+          });
+          if (!response.ok) {
+              const error = await response.json().catch(() => ({}));
+              throw new Error(error?.error || '文件名称修改失败');
+          }
+          const savedArchive = await response.json() as ArchiveItem;
+          setArchives(prev => prev.map(archive => archive.id === id ? savedArchive : archive));
+          notify('文件名称已修改', 'success');
+          return savedArchive;
+      } catch (error) {
+          notify(
+              error instanceof Error ? error.message : '文件名称修改失败',
+              'error',
+              undefined,
+              'System'
+          );
+          return null;
+      }
+  };
+
+  async function executeArchiveDeletion(
+      requestedId: string,
+      context?: {
+        projectId: string;
+        nodeId: string;
+        attachment: Attachment;
+      },
+      allowMissing = false
+  ) {
+      const contextualAttachment = context?.attachment;
+      const arc = archives.find(item =>
+        item.id === requestedId ||
+        Boolean(
+          contextualAttachment?.url &&
+          item.url === contextualAttachment.url &&
+          (!context?.projectId || item.projectId === context.projectId)
+        )
+      );
+      const containingProject = projects.find(project =>
+        project.id === context?.projectId ||
+        project.nodes.some(node =>
+          node.attachments.some(attachment =>
+            attachment.id === requestedId ||
+            Boolean(contextualAttachment?.url && attachment.url === contextualAttachment.url)
+          )
+        )
+      );
+      const fallbackAttachment = contextualAttachment || containingProject?.nodes
+        .flatMap(node => node.attachments)
+        .find(attachment => attachment.id === requestedId);
+
+      if (!arc && !fallbackAttachment) {
+          if (allowMissing) {
+              await syncToBackend('archives', 'DELETE', {}, requestedId);
+              return true;
+          }
+          return false;
+      }
+
+      const archiveId = arc?.id;
+      const targetUrl = arc?.url || fallbackAttachment?.url;
+      const targetProjectId = context?.projectId || arc?.projectId ||
+        containingProject?.id;
+      const changedProjects = projects.map(project => {
+        let changed = false;
+        const nodes = project.nodes.map(node => {
+          let nodeChanged = false;
+          const attachments = node.attachments.filter(attachment => {
+            const matches = attachment.id === requestedId ||
+              Boolean(archiveId && attachment.id === archiveId) ||
+              Boolean(
+                targetUrl &&
+                project.id === targetProjectId &&
+                attachment.url === targetUrl
+              );
+            if (matches) {
+              changed = true;
+              nodeChanged = true;
+            }
+            return !matches;
+          });
+          return nodeChanged ? { ...node, attachments } : node;
+        });
+        return changed ? { ...project, nodes } : project;
+      });
+      const projectsToSave = changedProjects.filter((project, index) =>
+        project !== projects[index]
+      );
+
+      if (archiveId) {
+          await syncToBackend('archives', 'DELETE', {}, archiveId);
+      } else if (allowMissing) {
+          await syncToBackend('archives', 'DELETE', {}, requestedId);
+      }
+      await Promise.all(projectsToSave.map(project =>
+        syncToBackend('projects', 'PUT', project, project.id)
+      ));
+
+      if (archiveId) {
+          setArchives(previous => previous.filter(item => item.id !== archiveId));
+      }
+      setProjects(changedProjects);
+      setSelectedProject(current =>
+        current
+          ? changedProjects.find(project => project.id === current.id) || null
+          : null
+      );
+      return true;
+  }
+
+  const handleDeleteArchive = (
+      requestedId: string,
+      context?: {
+        projectId: string;
+        nodeId: string;
+        attachment: Attachment;
+      }
+  ) => {
+      const contextualAttachment = context?.attachment;
+      const arc = archives.find(item =>
+        item.id === requestedId ||
+        Boolean(
+          contextualAttachment?.url &&
+          item.url === contextualAttachment.url &&
+          (!context?.projectId || item.projectId === context.projectId)
+        )
+      );
+      const containingProject = projects.find(project =>
+        project.id === context?.projectId ||
+        project.nodes.some(node =>
+          node.attachments.some(attachment =>
+            attachment.id === requestedId ||
+            Boolean(contextualAttachment?.url && attachment.url === contextualAttachment.url)
+          )
+        )
+      );
+      const fallbackAttachment = contextualAttachment || containingProject?.nodes
+        .flatMap(node => node.attachments)
+        .find(attachment => attachment.id === requestedId);
+
+      if (!arc && !fallbackAttachment) {
+          notify('附件不存在或已经删除，请刷新后重试', 'error', undefined, 'System');
+          void fetchData();
+          return;
+      }
+
+      const protectedItem = arc || {
+          id: requestedId,
+          title: fallbackAttachment?.name || '流程附件',
+          manager: containingProject?.manager,
+          uploadDate: fallbackAttachment?.uploadDate
+      };
+      const displayName = arc?.title || fallbackAttachment?.name || '流程附件';
+
+      void handleProtectedDelete(protectedItem, 'archives', displayName, async () => {
           try {
-              await syncToBackend('archives', 'DELETE', {}, id);
-              notify('档案已移至回收站', 'info'); 
-              fetchData();
-          } catch (e) { rollbackAfterSyncFailure('档案删除失败，已恢复服务器最新数据'); }
+              await executeArchiveDeletion(requestedId, context);
+              notify(
+                arc?.id ? '档案已移至回收站' : '历史流程附件已删除',
+                'info'
+              );
+              void fetchData();
+          } catch {
+              rollbackAfterSyncFailure('附件删除失败，已恢复服务器最新数据');
+          }
       });
   };
 
@@ -916,14 +1188,21 @@ function App() {
       });
   };
 
-  const handleUpdateProduction = (projProd: ProjectProduction) => {
+  const handleUpdateProduction = async (projProd: ProjectProduction) => {
       const normalized = normalizeProductionRecord(projProd);
+      const request = getProductionWriteRequest(productionData, normalized);
       setProductionData(prev => {
           const exists = prev.find(i => i.id === normalized.id);
           if (exists) return prev.map(i => i.id === normalized.id ? normalized : i);
           return [...prev, normalized];
       });
-      void syncToBackendOrRollback('production', 'POST', normalized, undefined, '生产数据同步失败，已恢复服务器最新数据');
+      return syncToBackendOrRollback(
+        'production',
+        request.method,
+        normalized,
+        request.id,
+        '生产数据同步失败，已恢复服务器最新数据'
+      );
   };
 
   const handleDeleteProduction = (projectId: string) => {
@@ -935,14 +1214,35 @@ function App() {
       });
   };
 
-  const handleAddApproval = (approval: Approval) => {
-      setApprovals(p => [...p, approval]);
-      void syncToBackendOrRollback('approvals', 'POST', approval, undefined, '审批创建失败，已恢复服务器最新数据');
+  const handleAddApproval = async (approval: Approval) => {
+      try {
+          const response = await syncToBackend('approvals', 'POST', approval);
+          const savedApproval = await response.json() as Approval;
+          setApprovals(previous => [...previous, savedApproval]);
+          return true;
+      } catch {
+          rollbackAfterSyncFailure('审批创建失败，已恢复服务器最新数据');
+          return false;
+      }
   };
 
-  const handleUpdateApproval = (approval: Approval) => {
-      setApprovals(p => p.map(a => a.id === approval.id ? approval : a));
-      void syncToBackendOrRollback('approvals', 'PUT', approval, approval.id, '审批更新失败，已恢复服务器最新数据');
+  const handleUpdateApproval = async (approval: Approval) => {
+      try {
+          const response = await syncToBackend(
+            'approvals',
+            'PUT',
+            approval,
+            approval.id
+          );
+          const savedApproval = await response.json() as Approval;
+          setApprovals(previous => previous.map(item =>
+            item.id === savedApproval.id ? savedApproval : item
+          ));
+          return true;
+      } catch {
+          rollbackAfterSyncFailure('审批更新失败，已恢复服务器最新数据');
+          return false;
+      }
   };
 
   const onDeleteApproval = (id: string) => {
@@ -1248,7 +1548,7 @@ function App() {
               />
             )}
             {activeView === 'projects' && (selectedProject ? 
-                <ProjectWorkflow project={selectedProject} nodes={selectedProject.nodes} onUpdateNode={handleUpdateWorkflowNode} onUpdateProject={handleUpdateProject} onBack={() => { if (homeReturnDrilldown) { setSelectedProject(null); setActiveView('home'); } else { setSelectedProject(null); } }} backLabel={homeReturnDrilldown ? '返回首页明细' : '返回项目台账'} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} archives={archives.filter(a => a.projectId === selectedProject.id)} currentUser={currentUser} users={users}/> :
+                <ProjectWorkflow project={selectedProject} nodes={selectedProject.nodes} onUpdateNode={handleUpdateWorkflowNode} onUpdateProject={handleUpdateProject} onBack={() => { if (homeReturnDrilldown) { setSelectedProject(null); setActiveView('home'); } else { setSelectedProject(null); } }} backLabel={homeReturnDrilldown ? '返回首页明细' : '返回项目台账'} onAddArchive={handleAddArchive} onAddArchives={handleAddArchives} onDeleteArchive={handleDeleteArchive} archives={archives.filter(a => a.projectId === selectedProject.id)} currentUser={currentUser} users={users}/> :
                 <ProjectList projects={projects} users={users} clients={clients} onSelectProject={setSelectedProject} onAddUser={handleAddUser} onDeleteUser={handleDeleteUser} onAddProject={handleAddProject} onUpdateProject={handleUpdateProject} onDeleteProject={handleDeleteProject} currentUser={currentUser} onAddApproval={handleAddApproval}/>
             )}
             {activeView === 'production' && <ProductionProgress projects={projects} productionData={productionData} onUpdateProject={handleUpdateProduction} onDeleteProjectProduction={handleDeleteProduction} currentUser={currentUser} initialProjectId={targetProductionProjectId} />}
@@ -1259,7 +1559,7 @@ function App() {
             {activeView === 'worklogs' && <WorkLogManager logs={workLogs} users={users} currentUser={currentUser} onAddLog={handleAddWorkLog} onUpdateLog={handleUpdateWorkLog} onDeleteLog={handleDeleteWorkLog} />}
             {activeView === 'chat' && <TeamChat currentUser={currentUser} messages={messages} channels={channels} projects={projects} users={users} onSendMessage={handleSendMessage} onDeleteMessage={handleDeleteMessage} onAddChannel={handleAddChannel} onUpdateChannel={handleUpdateChannel} lastReadMap={chatLastReadMap} onMarkRead={handleMarkChatRead} onDeleteChannel={handleDeleteChannel} activeChannelId={activeChannelId} onChannelSelect={setActiveChannelId} announcements={announcements} onAddAnnouncement={handleAddAnnouncement} onUpdateAnnouncement={handleUpdateAnnouncement} onDeleteAnnouncement={handleDeleteAnnouncement}/>}
             {activeView === 'email' && <EmailClient currentUser={currentUser} />}
-            {activeView === 'archives' && <EngineeringArchives archives={archives} projects={projects} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} onUpdateArchive={handleUpdateArchive} currentUser={currentUser} />}
+            {activeView === 'archives' && <EngineeringArchives archives={archives.filter(item => item.category !== 'Media')} projects={projects} onAddArchive={handleAddArchive} onDeleteArchive={handleDeleteArchive} onRenameArchive={handleRenameArchive} currentUser={currentUser} />}
             {activeView === 'clients' && <ClientManager clients={clients} onAddClient={handleAddClient} onUpdateClient={handleUpdateClient} onAddContact={handleAddContact} onDeleteClient={handleDeleteClient} currentUser={currentUser} />}
             {activeView === 'equipment' && <EquipmentLibrary equipmentList={equipment} onAddEquipment={handleAddEquipment} onUpdateEquipment={handleUpdateEquipment} onDeleteEquipment={handleDeleteEquipment} currentUser={currentUser} />}
             {activeView === 'docs' && <Documentation docs={docs} onAddDoc={handleAddDoc} onUpdateDoc={handleUpdateDoc} onDeleteDoc={handleDeleteDoc} currentUser={currentUser} />}

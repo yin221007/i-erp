@@ -1,9 +1,8 @@
 # 切换到 alpine 基础镜像以避开 Debian 仓库过期问题
-FROM node:20.19-alpine
+FROM node:20.19-alpine AS dependencies
 
 WORKDIR /app
 
-# 安装构建原生模块所需的工具 (Alpine 格式)
 RUN apk add --no-cache \
     python3 \
     make \
@@ -14,12 +13,21 @@ RUN apk add --no-cache \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# 复制服务端代码
-COPY server.js ./
-COPY server ./server
+FROM node:20.19-alpine
 
-# 创建上传目录并授权
-RUN mkdir -p uploads && chmod 777 uploads
+WORKDIR /app
+
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY --chown=node:node server.js ./
+COPY --chown=node:node server ./server
+
+# 生产容器由 Compose 映射为 NAS 专用 UID/GID；不要依赖构建阶段的
+# node 用户所有权。应用源码只读开放，上传目录仍由挂载目录控制写权限。
+RUN chmod 0444 /app/server.js \
+    && chmod -R a=rX /app/server \
+    && install -d -o node -g node -m 0750 uploads
+
+USER node
 
 # 暴露后端端口
 EXPOSE 3000

@@ -92,8 +92,22 @@ start_clone_candidate() {
 
 stop_old_stack() {
   log "Stopping old stack after maintenance mode confirmation"
-  docker compose -f "$OLD_COMPOSE_FILE" stop
+  compose_with_clean_env_file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" stop
   old_stopped=1
+}
+
+start_preserved_old_stack() {
+  GREEN_DB_NAME="$DB_NAME" \
+  GREEN_UPLOADS_PATH="$UPLOADS_PATH" \
+  GREEN_MAINTENANCE_QUEUE_PATH="$MAINTENANCE_QUEUE_PATH" \
+  GREEN_BACKEND_CONTAINER="$GREEN_BACKEND_CONTAINER" \
+  GREEN_FRONTEND_CONTAINER="$GREEN_FRONTEND_CONTAINER" \
+  GREEN_NETWORK_NAME="$GREEN_NETWORK_NAME" \
+  GREEN_FRONTEND_PORT="$GREEN_FRONTEND_PORT" \
+  BACKUP_PATH="$BACKUP_ROOT" \
+    compose_with_clean_env_file \
+      "$OLD_ENV_FILE" -p "$GREEN_PRODUCTION_PROJECT" \
+      -f "$OLD_COMPOSE_FILE" up -d
 }
 
 create_upgrade_snapshot() {
@@ -143,7 +157,7 @@ automatic_rollback() {
           }
       else
         log "Deployment failed before production migration; restarting old stack"
-        docker compose -f "$OLD_COMPOSE_FILE" up -d || {
+        start_preserved_old_stack || {
           printf 'OLD STACK RESTART FAILED. Keep maintenance mode enabled.\n' >&2
         }
       fi
@@ -178,7 +192,9 @@ main() {
   require_env \
     DB_HOST DB_USER DB_PASSWORD DB_NAME \
     PUBLIC_ORIGINS SESSION_SECRET MAINTENANCE_JOB_SECRET \
-    UPLOADS_PATH BACKUP_ROOT MAINTENANCE_QUEUE_PATH OLD_COMPOSE_FILE
+    UPLOADS_PATH BACKUP_ROOT MAINTENANCE_QUEUE_PATH OLD_COMPOSE_FILE OLD_ENV_FILE
+  [[ -f "$OLD_COMPOSE_FILE" ]] || die "Old Compose file does not exist"
+  [[ -f "$OLD_ENV_FILE" ]] || die "Old environment file does not exist"
   require_command docker curl sha256sum find
 
   verify_restore_drill "$RESTORE_DRILL_SNAPSHOT"

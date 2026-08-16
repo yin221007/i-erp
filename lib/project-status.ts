@@ -1,8 +1,7 @@
-import { Project, TaskStatus, WorkflowNode } from '../types';
+import type { Project, WorkflowNode } from '../types';
 
 const CONTRACT_NODE_KEYWORDS = ['合同', '招标投标'];
-const COMPLETION_NODE_KEYWORDS = ['竣工', '验收', '完工', '签收'];
-const PAYMENT_APPLICATION_NODE_KEYWORDS = ['开票申请支付'];
+const COST_ACCOUNTING_NODE_TITLE = '核算成本支出';
 
 export type ProjectBusinessStatus = 'Pending' | 'Active' | 'Completed';
 
@@ -15,26 +14,25 @@ export const getWorkflowNodeByKeywords = (project: Project, keywords: string[]):
 };
 
 export const getContractNode = (project: Project) => getWorkflowNodeByKeywords(project, CONTRACT_NODE_KEYWORDS);
-export const getCompletionNode = (project: Project) => getWorkflowNodeByKeywords(project, COMPLETION_NODE_KEYWORDS);
-export const getPaymentApplicationNode = (project: Project) => getWorkflowNodeByKeywords(project, PAYMENT_APPLICATION_NODE_KEYWORDS);
 
-export const isCompletionNodeDone = (project: Project) => getCompletionNode(project)?.status === TaskStatus.COMPLETED;
-
-export const isPaymentApplicationStarted = (project: Project) => {
-  const node = getPaymentApplicationNode(project);
-  return node?.status === TaskStatus.IN_PROGRESS || node?.status === TaskStatus.COMPLETED;
-};
-
-export const isProjectDelivered = (project: Project) => (
-  project.status === 'Completed' ||
-  isCompletionNodeDone(project) ||
-  isPaymentApplicationStarted(project)
+export const getCostAccountingNode = (project: Project) => (
+  (project.nodes || []).find(node => node.title.trim().includes(COST_ACCOUNTING_NODE_TITLE)) || null
 );
+
+export const isCostAccountingDone = (project: Project) => (
+  getCostAccountingNode(project)?.status === 'COMPLETED'
+);
+
+export const isProjectDelivered = (project: Project) => {
+  const costAccountingNode = getCostAccountingNode(project);
+  if (costAccountingNode) return isCostAccountingDone(project);
+  return project.status === 'Completed';
+};
 
 export const isProjectContractStarted = (project: Project) => {
   const node = getContractNode(project);
   if (!node) return project.status !== 'Pending';
-  return node.status === TaskStatus.COMPLETED;
+  return node.status === 'COMPLETED';
 };
 
 export const getProjectBusinessStatus = (project: Project): ProjectBusinessStatus => {

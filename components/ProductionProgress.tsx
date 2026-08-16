@@ -1,12 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectProduction, ProductionUnit, ProductionStatus, User, Project } from '../types';
-import { Search, ArrowLeft, Plus, Edit2, X, Save, Trash2, Download, Upload, FileSpreadsheet, CheckCircle2, PackageCheck, Truck, ClipboardList } from 'lucide-react';
+import { Search, ArrowLeft, Plus, Edit2, X, Save, Trash2, Download, Upload, FileSpreadsheet, PackageCheck, Truck, ClipboardList } from 'lucide-react';
 import { getBeijingDateString } from '../constants';
+import { rowsToProductionUnits } from '../lib/production-import.js';
+import {
+  appendProductionUnitsInSourceOrder,
+  sortProductionUnitsBySourceOrder
+} from '../lib/production-records.js';
 
 interface ProductionProgressProps {
   projects: Project[];
   productionData: ProjectProduction[];
-  onUpdateProject: (project: ProjectProduction) => void;
+  onUpdateProject: (project: ProjectProduction) => Promise<boolean>;
   onDeleteProjectProduction?: (projectId: string) => void;
   currentUser: User;
   initialProjectId?: string | null;
@@ -39,136 +44,7 @@ const createEmptyRecord = (project?: Project): ProjectProduction => ({
 const sumByStatus = (items: ProductionUnit[], status: ProductionStatus) =>
   items.filter(item => item.status === status).reduce((sum, item) => sum + (item.quantity || 0), 0);
 
-const getSerialSortValue = (value?: string) => {
-  if (!value) return Number.MAX_SAFE_INTEGER;
-  const match = value.match(/\d+/);
-  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
-};
-
-const sortProductionUnits = (items: ProductionUnit[]) => [...items].sort((a, b) => {
-  const serialDiff = getSerialSortValue(a.serialNumber) - getSerialSortValue(b.serialNumber);
-  if (serialDiff !== 0) return serialDiff;
-  return (a.serialNumber || a.name).localeCompare(b.serialNumber || b.name, 'zh-CN', { numeric: true });
-});
-
 const parseCsvLine = (line: string) => line.split(/,(?=(?:(?:[^\"]*\"){2})*[^\"]*$)/).map(part => part.replace(/^\"|\"$/g, '').trim());
-
-const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/\s+/g, '');
-
-const resolveProductionStatus = (rawValue: string, defaultStatus: ProductionStatus): ProductionStatus => {
-  const value = rawValue.trim();
-  if (value.includes('发') || value === 'Shipped') return 'Shipped';
-  if (value.includes('入') || value.includes('生产') || value === 'InStock') return 'InStock';
-  return defaultStatus;
-};
-
-const rowsToProductionUnits = (rows: string[][], defaultStatus: ProductionStatus): ProductionUnit[] => {
-  const cleanedRows = rows
-    .map(row => row.map(cell => String(cell || '').trim()))
-    .filter(row => row.some(Boolean));
-  if (cleanedRows.length === 0) return [];
-
-  const nameHeaders = ['设备名称', '名称', 'name', '品名', '产品名称', '货物名称', '材料名称', '设备/材料名称'].map(normalizeHeader);
-  const modelHeaders = ['型号', '规格', '型号/规格', '规格型号', '生产规格', '尺寸规格', '规格尺寸', '外形尺寸', '长宽高', '规格/尺寸', 'model', 'spec', '参数'].map(normalizeHeader);
-  const dimensionHeaders = ['尺寸', '尺寸(mm)', '长', '宽', '高', '长度', '宽度', '高度', '深度', '直径', '口径'].map(normalizeHeader);
-  const quantityHeaders = ['数量', 'quantity', 'qty', '件数', '台数', '工程量'].map(normalizeHeader);
-  const statusHeaders = ['状态', 'status', '生产状态'].map(normalizeHeader);
-  const notesHeaders = ['备注', 'notes', '说明', '技术要求'].map(normalizeHeader);
-  const dateHeaders = ['日期', '批次', 'date', 'batchdate'].map(normalizeHeader);
-  const serialHeaders = ['序号', '编号', 'no', '序列'].map(normalizeHeader);
-  const invalidNames = ['序号', '编号', '名称', '设备名称', '品名', '产品名称', '货物名称', '材料名称', '合计', '小计', '总计', '备注'].map(normalizeHeader);
-
-  const isNumericCell = (value: string) => /^\d+(?:\.\d+)?$/.test(value.replace(/,/g, '').trim());
-  const isSerialOnlyCell = (value: string) => /^\d+$/.test(value.trim());
-  const isLikelyHeaderRow = (row: string[]) => {
-    const normalized = row.map(normalizeHeader);
-    const hasName = normalized.some(value => nameHeaders.includes(value));
-    const hasQuantity = normalized.some(value => quantityHeaders.includes(value));
-    const hasModel = normalized.some(value => modelHeaders.includes(value));
-    const hasDimension = normalized.some(value => dimensionHeaders.includes(value));
-    const hasSerial = normalized.some(value => serialHeaders.includes(value));
-    return hasName && (hasQuantity || hasModel || hasDimension || hasSerial);
-  };
-
-  const headerIndex = cleanedRows.findIndex((row, index) => index < 12 && isLikelyHeaderRow(row));
-  const hasHeader = headerIndex >= 0;
-  const header = hasHeader ? cleanedRows[headerIndex].map(normalizeHeader) : [];
-  const dataRows = hasHeader ? cleanedRows.slice(headerIndex + 1) : cleanedRows;
-  const findHeader = (names: string[], fallback: number) => {
-    const index = header.findIndex(value => names.includes(value));
-    return index >= 0 ? index : fallback;
-  };
-  const findHeaders = (names: string[]) => header
-    .map((value, index) => names.includes(value) ? index : -1)
-    .filter(index => index >= 0);
-
-  const noHeaderFirstDataRow = dataRows.find(row => row.some(Boolean)) || [];
-  const hasLeadingSerialWithoutHeader = !hasHeader && isSerialOnlyCell(noHeaderFirstDataRow[0] || '') && Boolean(noHeaderFirstDataRow[1]) && !isNumericCell(noHeaderFirstDataRow[1]);
-  const serialIndex = hasHeader ? findHeader(serialHeaders, -1) : hasLeadingSerialWithoutHeader ? 0 : -1;
-  const nameIndex = findHeader(nameHeaders, hasLeadingSerialWithoutHeader ? 1 : 0);
-  const modelIndex = hasHeader ? findHeader(modelHeaders, -1) : findHeader(modelHeaders, hasLeadingSerialWithoutHeader ? 2 : 1);
-  const quantityIndex = hasHeader ? findHeader(quantityHeaders, -1) : findHeader(quantityHeaders, hasLeadingSerialWithoutHeader ? 3 : 2);
-  const statusIndex = hasHeader ? findHeader(statusHeaders, -1) : findHeader(statusHeaders, hasLeadingSerialWithoutHeader ? 4 : 3);
-  const notesIndex = hasHeader ? findHeader(notesHeaders, -1) : findHeader(notesHeaders, hasLeadingSerialWithoutHeader ? 5 : 4);
-  const dateIndex = hasHeader ? findHeader(dateHeaders, -1) : findHeader(dateHeaders, hasLeadingSerialWithoutHeader ? 6 : 5);
-  const dimensionIndices = hasHeader
-    ? findHeaders(dimensionHeaders).filter(index => index !== nameIndex && index !== modelIndex && index !== quantityIndex)
-    : [];
-  const rawHeaderRow = hasHeader ? cleanedRows[headerIndex] : [];
-
-  const resolveModel = (row: string[]) => {
-    const model = modelIndex >= 0 ? row[modelIndex] || '' : '';
-    if (model) return model;
-    const dimensions = dimensionIndices
-      .map(index => {
-        const value = row[index] || '';
-        if (!value) return '';
-        const label = rawHeaderRow[index] || '';
-        return label ? `${label}${value}` : value;
-      })
-      .filter(Boolean);
-    return dimensions.join(' × ');
-  };
-
-  const resolveQuantity = (row: string[]) => {
-    const preferred = row[quantityIndex] || '';
-    if (isNumericCell(preferred)) return Number(preferred.replace(/,/g, ''));
-    if (hasHeader) return 1;
-    for (let index = row.length - 1; index >= 0; index -= 1) {
-      if (index === nameIndex || index === modelIndex) continue;
-      if (hasLeadingSerialWithoutHeader && index === 0) continue;
-      const value = row[index] || '';
-      if (isNumericCell(value)) return Number(value.replace(/,/g, ''));
-    }
-    return 1;
-  };
-
-  return dataRows.map(row => {
-    const nonEmptyCells = row.filter(Boolean);
-    if (nonEmptyCells.length === 0) return null;
-    if (!hasHeader && nonEmptyCells.length === 1 && /项目|工程|清单|表$/.test(nonEmptyCells[0])) return null;
-
-    const name = row[nameIndex] || '';
-    const normalizedName = normalizeHeader(name);
-    if (!name || invalidNames.includes(normalizedName) || isSerialOnlyCell(name)) return null;
-
-    const serialNumber = serialIndex >= 0 ? (row[serialIndex] || '').trim() : '';
-    const model = resolveModel(row);
-    const quantity = resolveQuantity(row);
-    if (!Number.isFinite(quantity) || quantity <= 0) return null;
-
-    return {
-      id: Math.random().toString(36).slice(2, 11),
-      serialNumber,
-      name,
-      model,
-      quantity,
-      status: resolveProductionStatus(row[statusIndex] || '', defaultStatus),
-      notes: row[notesIndex] || '',
-      batchDate: row[dateIndex] || getBeijingDateString()
-    };
-  }).filter(Boolean) as ProductionUnit[];
-};
 
 const parseProductionCsv = (text: string, defaultStatus: ProductionStatus): ProductionUnit[] => {
   const rows = text.split(/\r\n|\n/).map(line => line.trim()).filter(Boolean).map(parseCsvLine);
@@ -244,13 +120,16 @@ const parseProductionXlsx = async (buffer: ArrayBuffer, defaultStatus: Productio
   return rowsToProductionUnits(rows, defaultStatus);
 };
 
-const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, productionData, onUpdateProject, onDeleteProjectProduction, initialProjectId }) => {
+const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, productionData, onUpdateProject, onDeleteProjectProduction, currentUser, initialProjectId }) => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ProductionUnit | null>(null);
-  const [formData, setFormData] = useState({ serialNumber: '', name: '', model: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status: 'Waiting' as ProductionStatus });
+  const [formData, setFormData] = useState({ serialNumber: '', name: '', model: '', actualProductionSpec: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status: 'Waiting' as ProductionStatus });
   const [importPreview, setImportPreview] = useState<{ fileName: string; items: ProductionUnit[] } | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [selectedPreviewItemIds, setSelectedPreviewItemIds] = useState<Set<string>>(new Set());
+  const [isImportSaving, setIsImportSaving] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -259,8 +138,26 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
     }
   }, [initialProjectId, projects]);
 
+  useEffect(() => {
+    setSelectedItemIds(new Set());
+  }, [selectedProjectId]);
+
   const activeProject = projects.find(p => p.id === selectedProjectId);
   const activeProductionData = productionData.find(p => p.projectId === selectedProjectId) || createEmptyRecord(activeProject);
+  const canEditActiveProduction = Boolean(
+    activeProject &&
+    (
+      currentUser.isDefaultAdmin === true ||
+      currentUser.role === 'Admin' ||
+      (
+        currentUser.permission === 'ReadWrite' &&
+        (
+          activeProject.manager === currentUser.nickname ||
+          ['总经办', '工程部', '生产部'].includes(currentUser.department)
+        )
+      )
+    )
+  );
 
   const summaries: ProductionSummary[] = projects.map(project => {
     const record = productionData.find(item => item.projectId === project.id) || createEmptyRecord(project);
@@ -277,17 +174,107 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
     item.project.manager.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const updateItems = (items: ProductionUnit[]) => {
-    if (!activeProject) return;
-    onUpdateProject({ ...activeProductionData, ...createEmptyRecord(activeProject), id: activeProductionData.id || activeProject.id, items });
+  const updateItems = async (items: ProductionUnit[]) => {
+    if (!activeProject || !canEditActiveProduction) return false;
+    return onUpdateProject({
+      ...activeProductionData,
+      ...createEmptyRecord(activeProject),
+      id: activeProductionData.id || activeProject.id,
+      items
+    });
+  };
+
+  const toggleItemSelection = (itemId: string) => {
+    setSelectedItemIds(current => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const allItemsSelected =
+    activeProductionData.items.length > 0 &&
+    activeProductionData.items.every(item => selectedItemIds.has(item.id));
+
+  const toggleAllItemSelection = () => {
+    setSelectedItemIds(
+      allItemsSelected
+        ? new Set()
+        : new Set(activeProductionData.items.map(item => item.id))
+    );
+  };
+
+  const deleteSelectedItems = async () => {
+    if (!canEditActiveProduction || selectedItemIds.size === 0) return;
+    if (!window.confirm(`确定删除选中的 ${selectedItemIds.size} 项设备吗？`)) return;
+    const saved = await updateItems(
+      activeProductionData.items.filter(item => !selectedItemIds.has(item.id))
+    );
+    if (saved) setSelectedItemIds(new Set());
+  };
+
+  const deleteSingleItem = async (itemId: string) => {
+    if (!canEditActiveProduction || !window.confirm('确定移除此项吗？')) return;
+    const saved = await updateItems(
+      activeProductionData.items.filter(item => item.id !== itemId)
+    );
+    if (!saved) return;
+    setSelectedItemIds(current => {
+      const next = new Set(current);
+      next.delete(itemId);
+      return next;
+    });
+  };
+
+  const togglePreviewItemSelection = (itemId: string) => {
+    setSelectedPreviewItemIds(current => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const allPreviewItemsSelected = Boolean(
+    importPreview?.items.length &&
+    importPreview.items.every(item => selectedPreviewItemIds.has(item.id))
+  );
+
+  const toggleAllPreviewItemSelection = () => {
+    if (!importPreview) return;
+    setSelectedPreviewItemIds(
+      allPreviewItemsSelected
+        ? new Set()
+        : new Set(importPreview.items.map(item => item.id))
+    );
+  };
+
+  const deleteSelectedPreviewItems = () => {
+    if (!importPreview || selectedPreviewItemIds.size === 0) return;
+    const remainingItems = importPreview.items.filter(
+      item => !selectedPreviewItemIds.has(item.id)
+    );
+    setImportPreview({ ...importPreview, items: remainingItems });
+    setSelectedPreviewItemIds(new Set());
+  };
+
+  const updatePreviewActualSpec = (itemId: string, actualProductionSpec: string) => {
+    if (!importPreview) return;
+    setImportPreview({
+      ...importPreview,
+      items: importPreview.items.map(item =>
+        item.id === itemId ? { ...item, actualProductionSpec } : item
+      )
+    });
   };
 
   const handleColumnExport = (status?: ProductionStatus) => {
     const items = status ? activeProductionData.items.filter(i => i.status === status) : activeProductionData.items;
     if (items.length === 0) return alert('暂无可导出的生产数据');
-    const sortedItems = sortProductionUnits(items);
-    const headers = ['编号', '设备名称', '型号/规格', '数量', '状态', '备注', '日期'];
-    const rows = sortedItems.map(item => [`"${item.serialNumber || ''}"`, `"${item.name}"`, `"${item.model || ''}"`, item.quantity, statusMeta[item.status].short, `"${item.notes || ''}"`, item.batchDate || ''].join(','));
+    const sortedItems = sortProductionUnitsBySourceOrder(items);
+    const headers = ['编号', '设备名称', '清单规格/型号', '实际生产规格', '数量', '状态', '备注', '日期'];
+    const rows = sortedItems.map(item => [`"${item.serialNumber || ''}"`, `"${item.name}"`, `"${item.model || ''}"`, `"${item.actualProductionSpec ?? item.model ?? ''}"`, item.quantity, statusMeta[item.status].short, `"${item.notes || ''}"`, item.batchDate || ''].join(','));
     const blob = new Blob(['\uFEFF' + [headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -297,7 +284,10 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
 
   const handleImport = (event: React.ChangeEvent<HTMLInputElement>, defaultStatus: ProductionStatus = 'Waiting') => {
     const file = event.target.files?.[0];
-    if (!file || !activeProject) return;
+    if (!file || !activeProject || !canEditActiveProduction) {
+      event.target.value = '';
+      return;
+    }
     const fileName = file.name.toLowerCase();
     if (fileName.endsWith('.xls') && !fileName.endsWith('.xlsx')) {
       alert('暂不支持旧版 .xls 二进制格式，请在 Excel 中另存为 .xlsx 或 CSV 后导入');
@@ -315,6 +305,7 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
           alert('没有识别到有效设备行，请确认表格列为：设备名称、型号/规格、数量、状态、备注、日期');
         } else {
           setImportPreview({ fileName: file.name, items: newItems });
+          setSelectedPreviewItemIds(new Set());
         }
       } catch (error) {
         alert(error instanceof Error ? error.message : '导入失败，请检查表格格式');
@@ -326,28 +317,44 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
     else reader.readAsText(file);
   };
 
-  const confirmImportPreview = () => {
-    if (!importPreview) return;
-    updateItems([...activeProductionData.items, ...importPreview.items]);
-    alert(`已导入 ${importPreview.items.length} 条生产记录`);
-    setImportPreview(null);
+  const confirmImportPreview = async () => {
+    if (!importPreview || importPreview.items.length === 0 || isImportSaving || !canEditActiveProduction) return;
+    setIsImportSaving(true);
+    const importedCount = importPreview.items.length;
+    try {
+      const saved = await updateItems(
+        appendProductionUnitsInSourceOrder(
+          activeProductionData.items,
+          importPreview.items
+        )
+      );
+      if (!saved) return;
+      setImportPreview(null);
+      setSelectedPreviewItemIds(new Set());
+      alert(`已写入并同步 ${importedCount} 条生产记录`);
+    } finally {
+      setIsImportSaving(false);
+    }
   };
 
   const openAddModal = (status: ProductionStatus) => {
+    if (!canEditActiveProduction) return;
     setEditingItem(null);
-    setFormData({ serialNumber: '', name: '', model: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status });
+    setFormData({ serialNumber: '', name: '', model: '', actualProductionSpec: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status });
     setIsModalOpen(true);
   };
 
   const handleSave = () => {
-    if (!selectedProjectId || !formData.name) return;
+    if (!selectedProjectId || !formData.name || !canEditActiveProduction) return;
     const quantity = Number(formData.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) return alert('请输入有效数量');
     const nextItem: ProductionUnit = {
       id: editingItem?.id || Math.random().toString(36).slice(2, 11),
       serialNumber: formData.serialNumber.trim(),
+      sourceOrder: editingItem?.sourceOrder,
       name: formData.name,
       model: formData.model,
+      actualProductionSpec: formData.actualProductionSpec,
       quantity,
       notes: formData.notes,
       batchDate: formData.batchDate,
@@ -355,19 +362,20 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
     };
     const items = editingItem
       ? activeProductionData.items.map(item => item.id === editingItem.id ? nextItem : item)
-      : [...activeProductionData.items, nextItem];
-    updateItems(items);
+      : appendProductionUnitsInSourceOrder(activeProductionData.items, [nextItem]);
+    void updateItems(items);
     setIsModalOpen(false);
   };
 
   const updateItemStatus = (id: string, status: ProductionStatus) => {
-    updateItems(activeProductionData.items.map(item => item.id === id ? { ...item, status, batchDate: item.batchDate || getBeijingDateString() } : item));
+    if (!canEditActiveProduction) return;
+    void updateItems(activeProductionData.items.map(item => item.id === id ? { ...item, status, batchDate: item.batchDate || getBeijingDateString() } : item));
   };
 
   const markAll = (status: ProductionStatus) => {
-    if (activeProductionData.items.length === 0) return;
+    if (!canEditActiveProduction || activeProductionData.items.length === 0) return;
     if (!window.confirm(`确定将当前工程所有设备标注为「${statusMeta[status].short}」吗？`)) return;
-    updateItems(activeProductionData.items.map(item => ({ ...item, status, batchDate: item.batchDate || getBeijingDateString() })));
+    void updateItems(activeProductionData.items.map(item => ({ ...item, status, batchDate: item.batchDate || getBeijingDateString() })));
   };
 
   if (!selectedProjectId) {
@@ -427,36 +435,71 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
           <p className="text-xs font-bold text-slate-400 mt-1">{activeProject?.clientName} · {activeProject?.manager}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <input ref={importInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={e => handleImport(e, 'Waiting')} />
-          <button onClick={() => importInputRef.current?.click()} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 flex items-center gap-2"><Upload className="w-4 h-4" /> 导入表格</button>
+          {canEditActiveProduction ? (
+            <>
+              <input ref={importInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={e => handleImport(e, 'Waiting')} />
+              <button onClick={() => importInputRef.current?.click()} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 flex items-center gap-2"><Upload className="w-4 h-4" /> 导入表格</button>
+            </>
+          ) : (
+            <span className="flex items-center rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-xs font-black text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">仅查看：非本工程项目经理</span>
+          )}
           <button onClick={() => handleColumnExport()} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 flex items-center gap-2"><Download className="w-4 h-4" /> 导出全部</button>
-          <button onClick={() => markAll('Waiting')} className="px-4 py-3 rounded-2xl bg-amber-50 text-amber-700 border border-amber-100 text-xs font-black">全部待生产</button>
-          <button onClick={() => markAll('InStock')} className="px-4 py-3 rounded-2xl bg-sky-50 text-sky-700 border border-sky-100 text-xs font-black">全部已生产/入库</button>
-          <button onClick={() => markAll('Shipped')} className="px-4 py-3 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-black">全部已发货</button>
+          {canEditActiveProduction && (
+            <>
+              <button onClick={toggleAllItemSelection} disabled={activeProductionData.items.length === 0} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 disabled:cursor-not-allowed disabled:opacity-50">{allItemsSelected ? '取消全选' : '全选设备'}</button>
+              <button onClick={() => void deleteSelectedItems()} disabled={selectedItemIds.size === 0} className="px-4 py-3 rounded-2xl bg-red-50 text-red-600 border border-red-100 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"><Trash2 className="w-4 h-4" /> 删除选中{selectedItemIds.size > 0 ? ` (${selectedItemIds.size})` : ''}</button>
+              <button onClick={() => markAll('Waiting')} className="px-4 py-3 rounded-2xl bg-amber-50 text-amber-700 border border-amber-100 text-xs font-black">全部待生产</button>
+              <button onClick={() => markAll('InStock')} className="px-4 py-3 rounded-2xl bg-sky-50 text-sky-700 border border-sky-100 text-xs font-black">全部已生产/入库</button>
+              <button onClick={() => markAll('Shipped')} className="px-4 py-3 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-black">全部已发货</button>
+            </>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 min-h-[34rem]">
         {(['Waiting', 'InStock', 'Shipped'] as ProductionStatus[]).map(status => {
-          const items = sortProductionUnits(activeProductionData.items.filter(i => i.status === status));
+          const items = sortProductionUnitsBySourceOrder(activeProductionData.items.filter(i => i.status === status));
           return (
             <section key={status} className="bg-slate-100/80 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden shadow-inner">
               <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800">
                 <span className="font-black text-xs text-slate-700 dark:text-slate-200 flex items-center gap-2">{statusMeta[status].icon}{statusMeta[status].label}<b className="text-slate-400">{items.reduce((sum, item) => sum + item.quantity, 0)}</b></span>
-                <div className="flex gap-1.5"><button onClick={() => openAddModal(status)} className="p-2 hover:bg-primary-50 dark:hover:bg-primary-900/40 rounded-xl text-primary-600"><Plus className="w-4 h-4" /></button><button onClick={() => handleColumnExport(status)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-400"><Download className="w-4 h-4" /></button></div>
+                <div className="flex gap-1.5">{canEditActiveProduction && <button onClick={() => openAddModal(status)} className="p-2 hover:bg-primary-50 dark:hover:bg-primary-900/40 rounded-xl text-primary-600"><Plus className="w-4 h-4" /></button>}<button onClick={() => handleColumnExport(status)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-400"><Download className="w-4 h-4" /></button></div>
               </div>
               <div className="p-4 space-y-3 overflow-y-auto flex-1 custom-scrollbar">
                 {items.length === 0 ? <div className="py-20 text-center text-slate-300"><FileSpreadsheet className="w-12 h-12 mx-auto mb-2 opacity-40" /><p className="text-xs font-black">暂无记录</p></div> : items.map(item => (
                   <div key={item.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-all hover:border-primary-500 group">
-                    <div className="flex justify-between gap-3"><div className="min-w-0"><div className="mb-1 flex items-center gap-2">{item.serialNumber && <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[9px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-300">编号 {item.serialNumber}</span>}<p className="truncate text-sm font-black text-slate-900 dark:text-white">{item.name}</p></div><p className="text-[10px] font-bold text-slate-400 truncate">{item.model || '未填写规格'}</p></div><span className="text-primary-600 dark:text-primary-400 font-black text-xs">x {item.quantity}</span></div>
+                    <div className="flex items-start gap-3">
+                      {canEditActiveProduction && (
+                        <input
+                          type="checkbox"
+                          aria-label={`选择设备 ${item.name}`}
+                          checked={selectedItemIds.has(item.id)}
+                          onChange={() => toggleItemSelection(item.id)}
+                          className="mt-1 h-4 w-4 shrink-0 accent-primary-600"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="mb-1 flex items-center gap-2">
+                              {item.serialNumber && <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[9px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-300">编号 {item.serialNumber}</span>}
+                              <p className="truncate text-sm font-black text-slate-900 dark:text-white">{item.name}</p>
+                            </div>
+                            <p className="truncate text-[10px] font-bold text-slate-400">清单规格：{item.model || '未填写'}</p>
+                            <p className="mt-1 truncate text-[10px] font-black text-primary-600 dark:text-primary-400">实际生产规格：{item.actualProductionSpec === undefined ? (item.model || '待填写') : (item.actualProductionSpec || '待填写')}</p>
+                          </div>
+                          <span className="text-primary-600 dark:text-primary-400 font-black text-xs">x {item.quantity}</span>
+                        </div>
+                      </div>
+                    </div>
                     {item.notes && <p className="mt-3 text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-xl border border-slate-100 dark:border-slate-700">{item.notes}</p>}
                     <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap justify-between gap-2">
                       <span className="text-[9px] font-black text-slate-400">{item.batchDate || '-'}</span>
-                      <div className="flex gap-1">
+                      {canEditActiveProduction && <div className="flex gap-1">
                         {(['Waiting', 'InStock', 'Shipped'] as ProductionStatus[]).map(nextStatus => <button key={nextStatus} onClick={() => updateItemStatus(item.id, nextStatus)} className={`px-2 py-1 rounded-lg text-[9px] font-black border ${item.status === nextStatus ? 'bg-primary-600 text-white border-primary-600' : 'text-slate-400 border-slate-200 dark:border-slate-700 hover:text-primary-600'}`}>{statusMeta[nextStatus].short}</button>)}
-                        <button onClick={() => { setEditingItem(item); setFormData({ serialNumber: item.serialNumber || '', name: item.name, model: item.model, quantity: item.quantity.toString(), notes: item.notes || '', batchDate: item.batchDate || getBeijingDateString(), status: item.status }); setIsModalOpen(true); }} className="p-1 text-slate-400 hover:text-primary-600"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => { if (window.confirm('确定移除此项吗？')) updateItems(activeProductionData.items.filter(i => i.id !== item.id)); }} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </div>
+                        <button onClick={() => { setEditingItem(item); setFormData({ serialNumber: item.serialNumber || '', name: item.name, model: item.model, actualProductionSpec: item.actualProductionSpec ?? item.model ?? '', quantity: item.quantity.toString(), notes: item.notes || '', batchDate: item.batchDate || getBeijingDateString(), status: item.status }); setIsModalOpen(true); }} className="p-1 text-slate-400 hover:text-primary-600"><Edit2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => void deleteSingleItem(item.id)} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>}
                     </div>
                   </div>
                 ))}
@@ -468,33 +511,45 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
 
       {importPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl dark:bg-slate-800">
+          <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl dark:bg-slate-800">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6 dark:border-slate-700">
               <div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">导入前确认</h3>
-                <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{importPreview.fileName} · 已识别 {importPreview.items.length} 条，请核对编号、名称、规格尺寸、数量和状态后再写入。</p>
+                <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{importPreview.fileName} · 已识别 {importPreview.items.length} 条，按原表行顺序显示；实际生产规格可在写入前直接修改。</p>
               </div>
-              <button onClick={() => setImportPreview(null)} className="rounded-2xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
+              <button onClick={() => { setImportPreview(null); setSelectedPreviewItemIds(new Set()); }} className="rounded-2xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
             </div>
             <div className="overflow-y-auto p-5 custom-scrollbar">
-              <div className="grid grid-cols-12 gap-3 rounded-2xl bg-slate-100 px-4 py-3 text-[10px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                <span className="col-span-2">编号</span><span className="col-span-3">名称</span><span className="col-span-3">规格尺寸</span><span className="col-span-2">数量</span><span className="col-span-2">状态</span>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs font-black text-slate-500">已选择 {selectedPreviewItemIds.size} 项</p>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={toggleAllPreviewItemSelection} disabled={importPreview.items.length === 0} className="rounded-xl border border-slate-200 px-4 py-2 text-[10px] font-black text-slate-600 hover:border-primary-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300">{allPreviewItemsSelected ? '取消全选' : '全选识别设备'}</button>
+                  <button onClick={deleteSelectedPreviewItems} disabled={selectedPreviewItemIds.size === 0} className="flex items-center gap-1.5 rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-[10px] font-black text-red-600 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /> 删除选中</button>
+                </div>
               </div>
-              <div className="mt-3 space-y-2">
-                {sortProductionUnits(importPreview.items).map(item => (
-                  <div key={item.id} className="grid grid-cols-12 gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                    <span className="col-span-2 truncate text-slate-500">{item.serialNumber || '-'}</span>
-                    <span className="col-span-3 truncate font-black text-slate-900 dark:text-white">{item.name}</span>
-                    <span className="col-span-3 truncate">{item.model || '未识别规格'}</span>
-                    <span className="col-span-2">{item.quantity}</span>
-                    <span className="col-span-2">{statusMeta[item.status].short}</span>
-                  </div>
-                ))}
+              <div className="min-w-[58rem]">
+                <div className="grid grid-cols-12 gap-3 rounded-2xl bg-slate-100 px-4 py-3 text-[10px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  <span className="col-span-1">选择</span><span className="col-span-1">编号</span><span className="col-span-2">名称</span><span className="col-span-2">清单规格</span><span className="col-span-3">实际生产规格</span><span className="col-span-1">数量</span><span className="col-span-2">状态</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {sortProductionUnitsBySourceOrder(importPreview.items).map(item => (
+                    <div key={item.id} className="grid grid-cols-12 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                      <span className="col-span-1"><input type="checkbox" aria-label={`选择识别设备 ${item.name}`} checked={selectedPreviewItemIds.has(item.id)} onChange={() => togglePreviewItemSelection(item.id)} className="h-4 w-4 accent-primary-600" /></span>
+                      <span className="col-span-1 truncate text-slate-500">{item.serialNumber || '-'}</span>
+                      <span className="col-span-2 truncate font-black text-slate-900 dark:text-white">{item.name}</span>
+                      <span className="col-span-2 truncate">{item.model || '未识别规格'}</span>
+                      <span className="col-span-3"><input value={item.actualProductionSpec ?? item.model ?? ''} onChange={event => updatePreviewActualSpec(item.id, event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-900 outline-none focus:border-primary-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></span>
+                      <span className="col-span-1">{item.quantity}</span>
+                      <span className="col-span-2">{statusMeta[item.status].short}</span>
+                    </div>
+                  ))}
+                  {importPreview.items.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 py-16 text-center text-xs font-black text-slate-400 dark:border-slate-700">已删除全部识别设备，请取消后重新导入或关闭窗口。</div>}
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-3 border-t border-slate-200 p-5 dark:border-slate-700">
-              <button onClick={() => setImportPreview(null)} className="px-6 py-3 text-xs font-black text-slate-500">取消导入</button>
-              <button onClick={confirmImportPreview} className="rounded-2xl bg-primary-600 px-8 py-3 text-xs font-black text-white shadow-xl shadow-primary-500/20 hover:bg-primary-700">确认写入</button>
+              <button disabled={isImportSaving} onClick={() => { setImportPreview(null); setSelectedPreviewItemIds(new Set()); }} className="px-6 py-3 text-xs font-black text-slate-500 disabled:cursor-not-allowed disabled:opacity-50">取消导入</button>
+              <button disabled={isImportSaving || importPreview.items.length === 0} onClick={confirmImportPreview} className="rounded-2xl bg-primary-600 px-8 py-3 text-xs font-black text-white shadow-xl shadow-primary-500/20 hover:bg-primary-700 disabled:cursor-wait disabled:opacity-60">{isImportSaving ? '正在同步…' : '确认写入并同步'}</button>
             </div>
           </div>
         </div>
@@ -507,7 +562,8 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
             <div className="space-y-4">
               <div><label className="block text-[10px] font-black text-slate-400 mb-1">编号 / 序号</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.serialNumber} onChange={e => setFormData({ ...formData, serialNumber: e.target.value })} /></div>
               <div><label className="block text-[10px] font-black text-slate-400 mb-1">设备名称 *</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} /></div>
-              <div><label className="block text-[10px] font-black text-slate-400 mb-1">生产规格 / 型号</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.model} onChange={e => setFormData({ ...formData, model: e.target.value })} /></div>
+              <div><label className="block text-[10px] font-black text-slate-400 mb-1">清单规格 / 型号（原表）</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.model} onChange={e => setFormData({ ...formData, model: e.target.value })} /></div>
+              <div><label className="block text-[10px] font-black text-primary-500 mb-1">实际生产规格（可编辑）</label><input className="w-full border-2 border-primary-100 dark:border-primary-900/60 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-primary-50/40 dark:bg-primary-950/20 text-slate-900 dark:text-white font-black" value={formData.actualProductionSpec} onChange={e => setFormData({ ...formData, actualProductionSpec: e.target.value })} placeholder="填写最终下单或实际制作尺寸" /></div>
               <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 mb-1">数量 *</label><input type="number" className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.quantity} onChange={e => setFormData({ ...formData, quantity: e.target.value })} /></div><div><label className="block text-[10px] font-black text-slate-400 mb-1">状态</label><select className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value as ProductionStatus })}><option value="Waiting">待生产</option><option value="InStock">已生产/入库</option><option value="Shipped">已发货</option></select></div></div>
               <div><label className="block text-[10px] font-black text-slate-400 mb-1">日期 / 批次</label><input type="date" className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.batchDate} onChange={e => setFormData({ ...formData, batchDate: e.target.value })} /></div>
               <div><label className="block text-[10px] font-black text-slate-400 mb-1">备注</label><textarea className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 h-24 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black resize-none" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} /></div>

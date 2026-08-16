@@ -7,8 +7,8 @@ import { API_URL, apiFetch } from '../lib/api';
 interface UserManagerProps {
   users: User[];
   currentUser: User;
-  onAddUser: (user: User) => void;
-  onUpdateUser: (user: User) => void;
+  onAddUser: (user: User) => boolean | Promise<boolean>;
+  onUpdateUser: (user: User) => boolean | Promise<boolean>;
   onDeleteUser: (userId: string) => void;
 }
 
@@ -17,7 +17,23 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState<{ filename: string; cleanupToken: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const cleanupPendingUpload = async () => {
+    if (!pendingUpload) return;
+    const upload = pendingUpload;
+    setPendingUpload(null);
+    await apiFetch(`${API_URL}/uploads/${upload.filename}`, {
+      method: 'DELETE',
+      headers: { 'X-Upload-Cleanup-Token': upload.cleanupToken }
+    }).catch(() => undefined);
+  };
+
+  const handleCloseModal = async () => {
+    await cleanupPendingUpload();
+    setIsModalOpen(false);
+  };
 
   const [formData, setFormData] = useState<Partial<User>>({
     nickname: '',
@@ -46,6 +62,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
   const handleOpenAdd = () => {
     if (!currentUser.isDefaultAdmin) return alert("只有超级管理员拥有开设账户的权限。");
     setEditingUser(null);
+    setPendingUpload(null);
     setFormData({
         nickname: '',
         password: '',
@@ -60,9 +77,10 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
   const handleOpenEdit = (user: User) => {
     if (!currentUser.isDefaultAdmin) return alert("只有超级管理员可以编辑他人账户资料。");
     setEditingUser(user);
+    setPendingUpload(null);
     setFormData({
         nickname: user.nickname,
-        password: user.password,
+        password: '',
         department: user.department,
         role: user.role,
         permission: user.permission || 'ReadWrite',
@@ -81,6 +99,11 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
         const uploadRes = await apiFetch(`${API_URL}/upload`, { method: 'POST', body: data });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const fileData = await uploadRes.json();
+        await cleanupPendingUpload();
+        setPendingUpload({
+          filename: fileData.filename,
+          cleanupToken: fileData.cleanupToken
+        });
         setFormData(prev => ({ ...prev, avatar: fileData.url }));
       } catch (error) {
         alert("头像上传失败");
@@ -90,9 +113,9 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
     }
   };
 
-  const handleSave = () => {
-    if (!formData.nickname || !formData.password) {
-        alert("请填写用户名和密码");
+  const handleSave = async () => {
+    if (!formData.nickname || (!editingUser && !formData.password)) {
+        alert(editingUser ? "请填写用户名" : "请填写用户名和密码");
         return;
     }
     const existing = users.find(u => u.nickname === formData.nickname);
@@ -113,7 +136,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
     const userPayload: User = {
         id: editingUser ? editingUser.id : Math.random().toString(36).substr(2, 9),
         nickname: formData.nickname!,
-        password: formData.password!,
+        ...(formData.password ? { password: formData.password } : {}),
         department: formData.department!,
         role: formData.role as UserRole,
         permission: formData.permission as UserPermission,
@@ -121,7 +144,12 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
         isDefaultAdmin: editingUser?.isDefaultAdmin,
         lastActive: editingUser?.lastActive
     };
-    editingUser ? onUpdateUser(userPayload) : onAddUser(userPayload);
+    const saved = await (editingUser ? onUpdateUser(userPayload) : onAddUser(userPayload));
+    if (!saved) {
+      await cleanupPendingUpload();
+      return;
+    }
+    setPendingUpload(null);
     setIsModalOpen(false);
   };
 
@@ -232,7 +260,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                 <div className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 transition-all">
                     <div className="flex justify-between items-center mb-8 border-b dark:border-slate-700 pb-4">
                         <h3 className="text-2xl font-black text-slate-800 dark:text-white transition-colors">{editingUser ? '编辑账户资料' : '开设新 ERP 账户'}</h3>
-                        <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors flex-shrink-0"><X className="w-6 h-6 text-slate-500" /></button>
+                        <button onClick={() => void handleCloseModal()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors flex-shrink-0"><X className="w-6 h-6 text-slate-500" /></button>
                     </div>
 
                     <div className="space-y-5 transition-all">
@@ -244,7 +272,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                         </div>
 
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">登录用户名 *</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={formData.nickname} onChange={e => setFormData({...formData, nickname: e.target.value})} /></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">访问密码 *</label><input type="text" className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} /></div>
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">{editingUser ? '新密码（留空则保持不变）' : '访问密码 *'}</label><input type="password" autoComplete="new-password" className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={formData.password || ''} onChange={e => setFormData({...formData, password: e.target.value})} /></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 transition-colors">业务所属部门</label><select className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black transition-all shadow-inner" value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})}>{DEPARTMENTS.map(dept => (<option key={dept} value={dept}>{dept}</option>))}</select></div>
 
                         <div>
@@ -269,7 +297,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                     </div>
 
                     <div className="flex justify-end gap-4 mt-12 pt-6 border-t dark:border-slate-700 transition-all">
-                        <button onClick={() => setIsModalOpen(false)} className="px-8 py-3 text-slate-400 font-black uppercase tracking-widest transition-colors">取消</button>
+                        <button onClick={() => void handleCloseModal()} className="px-8 py-3 text-slate-400 font-black uppercase tracking-widest transition-colors">取消</button>
                         <button onClick={handleSave} className="px-12 py-3 bg-primary-600 text-white rounded-2xl hover:bg-primary-700 shadow-2xl shadow-primary-500/30 flex items-center gap-2 font-black transition-all active:scale-95 uppercase tracking-widest"><Save className="w-5 h-5" /> 确认保存</button>
                     </div>
                 </div>

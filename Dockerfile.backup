@@ -16,4 +16,8 @@ COPY server/services/backup.js ./server/services/backup.js
 COPY server/services/maintenance-jobs.js ./server/services/maintenance-jobs.js
 COPY scripts/maintenance-job-cli.js ./scripts/maintenance-job-cli.js
 
+# 备份容器同样映射为 NAS 专用 UID/GID。发布目录收紧权限后，
+# 显式保证运行脚本和只读源码可被该身份读取、执行。
+RUN chmod -R a=rX /app/scripts /app/server
+
 CMD ["bash", "scripts/backup.sh"]

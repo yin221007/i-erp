@@ -17,6 +17,7 @@ const normalUser = {
   permission: 'ReadWrite'
 };
 const administrator = { id: 'u-1', role: 'Admin', isDefaultAdmin: true };
+const ordinaryAdministrator = { id: 'u-admin', role: 'Admin', isDefaultAdmin: false };
 
 test('unknown resources have no policy', () => {
   assert.equal(getResourcePolicy('projects'), 'scoped');
@@ -27,6 +28,35 @@ test('administrative resources reject normal-user writes', () => {
   assert.equal(canWriteResource('users', normalUser, { id: 'u-3' }), false);
   assert.equal(canWriteResource('settings', normalUser, {}), false);
   assert.equal(canWriteResource('users', administrator, { id: 'u-3' }), true);
+});
+
+test('only the default administrator can manage user accounts', () => {
+  const ordinaryUser = { id: 'u-3', role: 'User', isDefaultAdmin: false };
+  assert.equal(
+    canWriteResource('users', ordinaryAdministrator, ordinaryUser, { action: 'create' }),
+    false
+  );
+  assert.equal(
+    canWriteResource('users', administrator, ordinaryUser, { action: 'create' }),
+    true
+  );
+  assert.equal(
+    canWriteResource('users', administrator, { ...ordinaryUser, isDefaultAdmin: true }, { action: 'create' }),
+    false
+  );
+  assert.equal(
+    canWriteResource('users', administrator, administrator, { action: 'delete' }),
+    false
+  );
+  assert.equal(
+    canUpdateResource(
+      'users',
+      administrator,
+      { ...ordinaryUser, isDefaultAdmin: true },
+      ordinaryUser
+    ),
+    false
+  );
 });
 
 test('owner resources only expose the authenticated user records', () => {
@@ -68,14 +98,30 @@ test('project resources are scoped by ownership, department management, and exec
   );
 });
 
-test('project-linked money and production writes require the proper department and visible project', () => {
+test('project-linked money and production writes require the proper department or assigned project manager', () => {
   const context = {
-    projects: [{ id: 'p-1', manager: 'Alice' }],
-    users: [{ nickname: 'Alice', department: '销售部' }]
+    projects: [
+      { id: 'p-1', manager: 'Alice' },
+      { id: 'p-other', manager: 'Bob' }
+    ],
+    users: [
+      { nickname: 'Alice', department: '销售部' },
+      { nickname: 'Bob', department: '销售部' }
+    ]
   };
 
   assert.equal(canWriteResource('payments', normalUser, { projectId: 'p-1' }, context), true);
-  assert.equal(canWriteResource('production', normalUser, { projectId: 'p-1' }, context), false);
+  assert.equal(canWriteResource('production', normalUser, { projectId: 'p-1' }, context), true);
+  assert.equal(canWriteResource('production', normalUser, { projectId: 'p-other' }, context), false);
+  assert.equal(
+    canWriteResource(
+      'production',
+      normalUser,
+      { projectId: 'missing', manager: 'Alice' },
+      context
+    ),
+    false
+  );
   assert.equal(
     canWriteResource(
       'production',
@@ -85,7 +131,50 @@ test('project-linked money and production writes require the proper department a
     ),
     true
   );
+  assert.equal(
+    canWriteResource(
+      'production',
+      { ...normalUser, department: '财务部' },
+      { projectId: 'p-other' },
+      context
+    ),
+    false
+  );
   assert.equal(canWriteResource('payments', normalUser, { projectId: 'p-hidden' }, context), false);
+});
+
+test('updates require write access to both the stored and submitted project ownership', () => {
+  const context = {
+    projects: [
+      { id: 'p-mine', manager: 'Alice' },
+      { id: 'p-hidden', manager: 'Eve' }
+    ],
+    users: [
+      { nickname: 'Alice', department: '销售部' },
+      { nickname: 'Eve', department: '工程部' }
+    ]
+  };
+
+  assert.equal(
+    canUpdateResource(
+      'payments',
+      normalUser,
+      { id: 'pay-hidden', projectId: 'p-mine', managerName: 'Alice' },
+      { id: 'pay-hidden', projectId: 'p-hidden', managerName: 'Eve' },
+      context
+    ),
+    false
+  );
+  assert.equal(
+    canUpdateResource(
+      'payments',
+      normalUser,
+      { id: 'pay-mine', projectId: 'p-mine', managerName: 'Alice' },
+      { id: 'pay-mine', projectId: 'p-mine', managerName: 'Alice' },
+      context
+    ),
+    true
+  );
 });
 
 test('user resources never expose password or private credentials', () => {
@@ -207,6 +296,11 @@ test('approval updates allow only valid applicant edits or current approver outc
     ...approved,
     currentContent: '审批时偷偷改内容'
   };
+  const forgedExecution = {
+    ...approved,
+    actionExecutionStatus: 'Completed',
+    actionExecutedAt: '2026-01-01T01:00:00.000Z'
+  };
   const returnedPrevious = {
     ...previous,
     status: 'Returned',
@@ -231,4 +325,5 @@ test('approval updates allow only valid applicant edits or current approver outc
   assert.equal(canUpdateResource('approvals', normalUser, applicantRename, returnedPrevious), false);
   assert.equal(canUpdateResource('approvals', approver, approved, previous), true);
   assert.equal(canUpdateResource('approvals', approver, tamperedContent, previous), false);
+  assert.equal(canUpdateResource('approvals', approver, forgedExecution, previous), false);
 });

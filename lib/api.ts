@@ -16,6 +16,19 @@ type ApiRequestInit = RequestInit & {
   json?: unknown;
 };
 
+type UploadRequestInit = {
+  method?: string;
+  body: XMLHttpRequestBodyInit;
+  headers?: Record<string, string>;
+  onProgress?: (loaded: number, total: number) => void;
+};
+
+export type UploadResponse = {
+  ok: boolean;
+  status: number;
+  data: any;
+};
+
 let unauthorizedHandler: (() => void) | null = null;
 
 export function setUnauthorizedHandler(handler: (() => void) | null) {
@@ -68,4 +81,45 @@ export async function apiJson<T>(
     );
   }
   return data as T;
+}
+
+export function apiUpload(
+  input: string,
+  {
+    method = 'POST',
+    body,
+    headers = {},
+    onProgress
+  }: UploadRequestInit
+): Promise<UploadResponse> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(method, input);
+    request.withCredentials = true;
+    for (const [name, value] of Object.entries(headers)) {
+      request.setRequestHeader(name, value);
+    }
+    request.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    };
+    request.onerror = () => reject(new Error('网络连接中断'));
+    request.onabort = () => reject(new Error('上传已取消'));
+    request.onload = () => {
+      if (request.status === 401) unauthorizedHandler?.();
+      let data: any = {};
+      if (request.responseText) {
+        try {
+          data = JSON.parse(request.responseText);
+        } catch {
+          data = { error: request.responseText };
+        }
+      }
+      resolve({
+        ok: request.status >= 200 && request.status < 300,
+        status: request.status,
+        data
+      });
+    };
+    request.send(body);
+  });
 }

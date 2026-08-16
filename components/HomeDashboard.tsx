@@ -35,6 +35,7 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
+import type { TooltipProps } from 'recharts';
 import {
   Approval,
   ArchiveItem,
@@ -50,9 +51,9 @@ import {
   WorkLogEntry
 } from '../types';
 import {
-  getCompletionNode,
+  getCostAccountingNode,
   getProjectBusinessStatus,
-  isCompletionNodeDone,
+  isCostAccountingDone,
   isProjectContractStarted,
   isProjectDelivered
 } from '../lib/project-status';
@@ -129,6 +130,35 @@ interface DrilldownState {
 }
 
 const CHART_COLORS = ['#22d3ee', '#38bdf8', '#818cf8', '#a78bfa', '#34d399', '#f59e0b', '#fb7185'];
+const DASHBOARD_TOOLTIP_PROPS = {
+  trigger: 'hover',
+  cursor: false,
+  contentStyle: {
+    backgroundColor: 'rgba(15, 23, 42, 0.96)',
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    borderRadius: '14px',
+    boxShadow: '0 14px 32px rgba(15, 23, 42, 0.24)',
+    color: '#f8fafc',
+    padding: '10px 12px'
+  },
+  itemStyle: {
+    color: '#f8fafc',
+    fontSize: '12px',
+    fontWeight: 800,
+    padding: 0
+  },
+  labelStyle: {
+    color: '#cbd5e1',
+    fontSize: '11px',
+    fontWeight: 700,
+    marginBottom: '4px'
+  },
+  wrapperStyle: {
+    outline: 'none',
+    pointerEvents: 'none',
+    zIndex: 30
+  }
+} satisfies Partial<TooltipProps<number, string>>;
 const MONEY_DEPARTMENTS = ['财务部', '总经办'];
 const EXEC_DEPARTMENTS = ['财务部', '总经办'];
 const parseDate = (value?: string) => {
@@ -180,7 +210,7 @@ const getProjectContractDue = (project: Project) => {
   return {
     date,
     label: project.deadline,
-    completionNode: getCompletionNode(project)
+    completionNode: getCostAccountingNode(project)
   };
 };
 
@@ -277,9 +307,10 @@ const getVisibleData = (props: HomeDashboardProps) => {
         return false;
       });
 
+  const regularArchives = archives.filter(archive => archive.category !== 'Media');
   const visibleArchives = isGlobalUser
-    ? archives
-    : archives.filter(archive => {
+    ? regularArchives
+    : regularArchives.filter(archive => {
         if (archive.uploader === currentUser.nickname) return true;
         return Boolean(archive.projectId && visibleProjectIds.has(archive.projectId));
       });
@@ -462,12 +493,12 @@ const buildDashboardModel = (props: HomeDashboardProps) => {
 
   visibleProjects.forEach(project => {
     const contractDue = getProjectContractDue(project);
-    const completionNodeDone = isCompletionNodeDone(project);
+    const completionNodeDone = isCostAccountingDone(project);
     const delivered = isProjectDelivered(project);
     const contractStarted = isProjectContractStarted(project);
     if (contractDue && contractStarted && !completionNodeDone && !delivered) {
       const diff = daysBetween(today, contractDue.date);
-      const nodeLabel = contractDue.completionNode?.title || '竣工/验收节点';
+      const nodeLabel = contractDue.completionNode?.title || '核算成本支出节点';
       if (diff < 0) {
         risks.push({
           id: `project-overdue-${project.id}`,
@@ -562,7 +593,7 @@ const buildDashboardModel = (props: HomeDashboardProps) => {
     const diff = daysBetween(today, contractDue.date);
     if (diff < 0 || diff > 15) return;
     const production = visibleProduction.find(record => record.projectId === project.id);
-    const nodeLabel = contractDue.completionNode?.title || '竣工/验收节点';
+    const nodeLabel = contractDue.completionNode?.title || '核算成本支出节点';
     if (!production || production.items.length === 0) {
       risks.push({
         id: `production-missing-${project.id}`,
@@ -918,12 +949,12 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
 
   const showDetails = (state: DrilldownState) => setDrilldown(state);
   const projectEntries = (items: Project[]): DrilldownEntry[] => items.map(project => {
-    const completionNode = getCompletionNode(project);
+    const completionNode = getCostAccountingNode(project);
     return {
       id: project.id,
       title: project.name,
       detail: `${project.clientName} · ${project.manager || '未指定负责人'} · 当前进度 ${project.progress || 0}%`,
-      meta: `合同 ${project.deadline || '未设置'} · ${completionNode ? `${completionNode.title}${completionNode.status === TaskStatus.COMPLETED ? '已完成' : '未完成'}` : '未设置竣工/验收节点'}`,
+      meta: `合同 ${project.deadline || '未设置'} · ${completionNode ? `${completionNode.title}${completionNode.status === TaskStatus.COMPLETED ? '已完成' : '未完成'}` : '未设置核算成本支出节点'}`,
       badge: getProjectBusinessStatus(project) === 'Active' ? '在建' : getProjectBusinessStatus(project) === 'Pending' ? '待启动' : '已竣工',
       targetView: 'projects',
       targetContext: { projectId: project.id }
@@ -1006,6 +1037,8 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
     });
   };
 
+  const projectStatusSlices = model.projectStatusChart.filter(entry => entry.value > 0);
+
   return (
     <div className="min-h-full rounded-[1.5rem] bg-slate-50 text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-950 dark:text-white dark:ring-white/10">
       <div className="relative overflow-hidden rounded-[1.5rem]">
@@ -1020,7 +1053,7 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                 首页总览
               </div>
               <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl dark:text-white">
-                {model.isGlobalUser ? '经营首页' : '我的首页'}
+                我的首页
               </h1>
               <p className="mt-2 max-w-2xl text-sm font-bold leading-5 text-slate-600 dark:text-slate-400">
                 当前看板按账号权限展示。视图：
@@ -1087,12 +1120,22 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                 <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={model.projectStatusChart} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={5} onClick={(entry: any) => { const list = entry?.name === '在建' ? model.activeProjects : entry?.name === '待启动' ? model.pendingProjects : model.completedProjects; showDetails({ title: `${entry?.name || '工程'}明细`, subtitle: '点击明细可进入工程项目模块', entries: projectEntries(list), emptyText: '暂无工程' }); }}>
-                        {model.projectStatusChart.map((_, index) => (
+                      <Pie
+                        data={projectStatusSlices}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={50}
+                        outerRadius={74}
+                        paddingAngle={projectStatusSlices.length > 1 ? 3 : 0}
+                        cornerRadius={projectStatusSlices.length > 1 ? 8 : 0}
+                        stroke="none"
+                        onClick={(entry: any) => { const list = entry?.name === '在建' ? model.activeProjects : entry?.name === '待启动' ? model.pendingProjects : model.completedProjects; showDetails({ title: `${entry?.name || '工程'}明细`, subtitle: '点击明细可进入工程项目模块', entries: projectEntries(list), emptyText: '暂无工程' }); }}
+                      >
+                        {projectStatusSlices.map((_, index) => (
                           <Cell key={`project-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value: number) => `${value} 个项目`} contentStyle={{ background: '#020617', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', color: '#fff' }} />
+                      <Tooltip {...DASHBOARD_TOOLTIP_PROPS} formatter={(value: number) => `${value} 个项目`} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -1124,7 +1167,7 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                     <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
                     <XAxis dataKey="month" stroke="#64748b" tickLine={false} axisLine={false} fontSize={11} />
                     <YAxis allowDecimals={model.canViewMoney} stroke="#64748b" tickLine={false} axisLine={false} fontSize={11} tickFormatter={value => model.canViewMoney ? `${Math.round(Number(value) / 10000)}万` : String(value)} />
-                    <Tooltip formatter={(value: number) => model.canViewMoney ? formatCurrency(value) : `${value} 项`} labelFormatter={(label) => `${label} 应回款`} contentStyle={{ background: '#020617', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', color: '#fff' }} />
+                    <Tooltip {...DASHBOARD_TOOLTIP_PROPS} formatter={(value: number) => model.canViewMoney ? formatCurrency(value) : `${value} 项`} labelFormatter={(label) => `${label} 应回款`} />
                     <Area type="monotone" dataKey={model.canViewMoney ? 'dueAmount' : 'itemCount'} name={model.canViewMoney ? '应回款' : '风险项目'} stroke="#22d3ee" strokeWidth={3} fill="url(#paymentGradient)" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -1141,7 +1184,10 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                           <Cell key={`production-${index}`} fill={CHART_COLORS[(index + 2) % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', color: '#fff' }} />
+                      <Tooltip
+                        {...DASHBOARD_TOOLTIP_PROPS}
+                        formatter={(value: number) => [`${value} 台`, '设备数量']}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -1170,7 +1216,10 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                       <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
                       <XAxis dataKey="name" stroke="#64748b" tickLine={false} axisLine={false} fontSize={11} />
                       <YAxis allowDecimals={false} stroke="#64748b" tickLine={false} axisLine={false} fontSize={11} />
-                      <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', color: '#fff' }} />
+                      <Tooltip
+                        {...DASHBOARD_TOOLTIP_PROPS}
+                        formatter={(value: number) => [`${value} 项`, '风险数量']}
+                      />
                       <Bar dataKey="value" radius={[10, 10, 0, 0]}>
                         {visibleRiskChart.map((_, index) => (
                           <Cell key={`risk-${index}`} fill={CHART_COLORS[(index + 1) % CHART_COLORS.length]} />
@@ -1216,7 +1265,10 @@ const HomeDashboard: React.FC<HomeDashboardProps> = props => {
                     <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
                     <XAxis dataKey="day" stroke="#64748b" tickLine={false} axisLine={false} fontSize={11} />
                     <YAxis allowDecimals={false} stroke="#64748b" tickLine={false} axisLine={false} fontSize={11} />
-                    <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', color: '#fff' }} />
+                    <Tooltip
+                      {...DASHBOARD_TOOLTIP_PROPS}
+                      formatter={(value: number) => [`${value} 条`, '动态数量']}
+                    />
                     <Line type="monotone" dataKey="value" stroke="#a78bfa" strokeWidth={3} dot={{ r: 4, fill: '#a78bfa' }} />
                   </LineChart>
                 </ResponsiveContainer>

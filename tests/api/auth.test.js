@@ -9,6 +9,7 @@ class FakeAuthPool {
     this.users = new Map(users.map(user => [user.id, structuredClone(user)]));
     this.sessions = new Map();
     this.heartbeatUpdates = 0;
+    this.sessionTouchUpdates = 0;
   }
 
   async query(sql, parameters = []) {
@@ -65,6 +66,7 @@ class FakeAuthPool {
       const user = this.users.get(session.userId);
       return [[{
         session_id: session.id,
+        last_seen_at: session.lastSeenAt,
         expires_at: session.expiresAt,
         absolute_expires_at: session.absoluteExpiresAt,
         json_data: JSON.stringify(user)
@@ -76,6 +78,7 @@ class FakeAuthPool {
       const session = this.sessions.get(id);
       session.lastSeenAt = lastSeenAt;
       session.expiresAt = expiresAt;
+      this.sessionTouchUpdates += 1;
       return [{ affectedRows: 1 }, []];
     }
 
@@ -116,9 +119,10 @@ const config = {
 };
 
 async function createAuthTestApp() {
-  const [adminPassword, memberPassword] = await Promise.all([
+  const [adminPassword, memberPassword, spacedPassword] = await Promise.all([
     hashPassword('password'),
-    hashPassword('member-password')
+    hashPassword('member-password'),
+    hashPassword(' exact password ')
   ]);
   const pool = new FakeAuthPool([
     {
@@ -144,6 +148,16 @@ async function createAuthTestApp() {
           pushPlusToken: 'existing-secret'
         }
       }
+    },
+    {
+      id: 'u-3',
+      nickname: 'spaced',
+      password: spacedPassword,
+      department: '工程部',
+      role: 'User',
+      permission: 'ReadWrite',
+      isDefaultAdmin: false,
+      avatar: ''
     }
   ]);
   return { app: createApp({ pool, config }), pool };
@@ -166,6 +180,20 @@ test('login issues a secure HttpOnly cookie and returns a safe user', async () =
   );
   assert.equal(response.body.user.nickname, 'admin');
   assert.equal('password' in response.body.user, false);
+});
+
+test('login preserves password whitespace exactly', async () => {
+  const { app } = await createAuthTestApp();
+
+  await request(app)
+    .post('/auth/login')
+    .send({ username: 'spaced', password: ' exact password ' })
+    .expect(200);
+
+  await request(app)
+    .post('/auth/login')
+    .send({ username: 'spaced', password: 'exact password' })
+    .expect(401);
 });
 
 test('forged x-user-id does not authenticate a request', async () => {
@@ -202,6 +230,24 @@ test('multiple device sessions remain independent when one logs out', async () =
 
   await request(app).get('/auth/me').set('Cookie', firstCookie).expect(401);
   await request(app).get('/auth/me').set('Cookie', secondCookie).expect(200);
+});
+
+test('authenticated requests throttle sliding-session database writes', async () => {
+  const { app, pool } = await createAuthTestApp();
+  const login = await request(app)
+    .post('/auth/login')
+    .send({ username: 'member', password: 'member-password' })
+    .expect(200);
+  const cookie = sessionCookie(login);
+
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  assert.equal(pool.sessionTouchUpdates, 0);
+
+  const session = [...pool.sessions.values()][0];
+  session.lastSeenAt = new Date(Date.now() - 3 * 60 * 1000);
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  assert.equal(pool.sessionTouchUpdates, 1);
 });
 
 test('login failures are rate limited by username and client address', async () => {

@@ -115,9 +115,10 @@ const Header: React.FC<HeaderProps> = ({ onMenuToggle, currentUser, allUsers, on
   }, [userPrefs?.weatherLocation]);
 
   const formatTime = (date: Date) => {
-    const dateOptions: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric', weekday: 'narrow' };
+    const dateOptions: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' };
     const timeOptions: Intl.DateTimeFormatOptions = { hour12: userPrefs?.timeFormat === '12h', hour: '2-digit', minute: '2-digit' };
-    const dateStr = date.toLocaleDateString('zh-CN', dateOptions);
+    const weekday = date.toLocaleDateString('zh-CN', { weekday: 'short' });
+    const dateStr = `${date.toLocaleDateString('zh-CN', dateOptions)} ${weekday}`;
     const timeStr = date.toLocaleTimeString('zh-CN', timeOptions);
     return { dateStr, timeStr };
   };
