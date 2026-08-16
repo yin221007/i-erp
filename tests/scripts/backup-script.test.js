@@ -69,6 +69,15 @@ test('backup counts the tables that actually exist in legacy or current schemas'
   assert.doesNotMatch(source, /resource_tables=\(/);
 });
 
+test('backup excludes resumable uploads and derived thumbnails from snapshots and counts', async () => {
+  const source = await readFile(scriptUrl, 'utf8');
+
+  assert.match(source, /--exclude='\.\/\.ierp-upload-chunks'/);
+  assert.match(source, /--exclude='\.\/\.ierp-thumbnails'/);
+  assert.match(source, /-path "\$UPLOADS_ROOT\/\.ierp-upload-chunks"/);
+  assert.match(source, /-path "\$UPLOADS_ROOT\/\.ierp-thumbnails"/);
+});
+
 test('backup script is valid Bash syntax', () => {
   const result = spawnSync('/bin/bash', ['-n', scriptUrl.pathname], {
     encoding: 'utf8'

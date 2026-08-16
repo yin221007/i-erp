@@ -11,7 +11,10 @@ import {
   hashPassword,
   isPasswordHash
 } from '../auth/passwords.js';
-import { moveToRecycleBin } from '../services/recycle-bin.js';
+import { moveToRecycleBin, withTransaction } from '../services/recycle-bin.js';
+
+const MAX_ARCHIVE_BATCH_SIZE = 30;
+const INVALID_ARCHIVE_TITLE_CHARACTERS = /[\u0000-\u001f\u007f<>:"/\\|?*]/;
 
 function parseJson(value, context) {
   if (value && typeof value === 'object') return structuredClone(value);
@@ -37,6 +40,26 @@ function validateUserInput(input, { requirePassword }) {
     return 'Password is too long';
   }
   return null;
+}
+
+function normalizeArchiveTitle(value) {
+  if (typeof value !== 'string') {
+    return { error: 'Archive title must be a string' };
+  }
+  const title = value.trim();
+  if (!title || title.length > 200) {
+    return { error: 'Archive title must contain 1-200 characters' };
+  }
+  if (INVALID_ARCHIVE_TITLE_CHARACTERS.test(title) || /[. ]$/.test(title)) {
+    return { error: 'Archive title contains invalid filename characters' };
+  }
+  return { title };
+}
+
+function canRenameArchive(user, archive) {
+  if (user?.isDefaultAdmin === true) return true;
+  if (archive?.uploaderId) return archive.uploaderId === user?.id;
+  return archive?.uploader === user?.nickname;
 }
 
 const PROJECT_MEDIA_PHASES = new Set([
@@ -269,11 +292,24 @@ async function prepareRecord(resource, user, input, routeId) {
   }
   if (resource === 'archives' && !routeId) {
     record.uploader = user.nickname;
+    record.uploaderId = user.id;
   }
   if (resource === 'approvals' && !routeId) {
     record.applicantId = user.id;
     record.applicantName = user.nickname;
     record.department = user.department;
+    if (!Array.isArray(record.versions) || record.versions.length === 0) {
+      const submittedAt = record.createdAt || new Date().toISOString();
+      record.versions = [{
+        version: 1,
+        content: record.currentContent || '',
+        attachments: Array.isArray(record.currentAttachments)
+          ? record.currentAttachments
+          : [],
+        submittedAt,
+        outcomes: []
+      }];
+    }
   }
 
   if (
@@ -290,7 +326,129 @@ async function prepareRecord(resource, user, input, routeId) {
 export function createResourceRouter({ pool, onRecordSaved }) {
   const router = express.Router();
 
+  router.post('/archives/batch', requireAuth, async (req, res, next) => {
+    try {
+      if (
+        !Array.isArray(req.body) ||
+        req.body.length === 0 ||
+        req.body.length > MAX_ARCHIVE_BATCH_SIZE ||
+        req.body.some(item => !isRecord(item))
+      ) {
+        return res.status(400).json({
+          error: `Archive batch must contain 1-${MAX_ARCHIVE_BATCH_SIZE} records`
+        });
+      }
+
+      const policyContext = await loadPolicyContext(pool, 'archives');
+      const existingArchives = policyContext.archives || [];
+      const existingIds = new Set(existingArchives.map(record => record.id));
+      const requestIds = new Set();
+      const records = [];
+
+      for (const input of req.body) {
+        let record = await prepareRecord('archives', req.authUser, input);
+        if (!record.id) {
+          return res.status(400).json({ error: 'Record id is required' });
+        }
+        if (existingIds.has(record.id) || requestIds.has(record.id)) {
+          return res.status(409).json({ error: 'Record id already exists' });
+        }
+        requestIds.add(record.id);
+
+        const validation = normalizeAndValidateArchive(
+          record,
+          policyContext.projects || [],
+          null,
+          [...existingArchives, ...records]
+        );
+        if (validation.error) {
+          return res.status(400).json({ error: validation.error });
+        }
+        record = validation.record;
+        if (!canWriteResource('archives', req.authUser, record, {
+          ...policyContext,
+          action: 'create'
+        })) {
+          return res.status(403).json({ error: 'Write access denied' });
+        }
+        records.push(record);
+      }
+
+      await withTransaction(pool, async connection => {
+        for (const record of records) {
+          await connection.query(
+            `INSERT INTO \`archives\`
+              (id, json_data, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)`,
+            [record.id, JSON.stringify(record)]
+          );
+        }
+      });
+
+      if (onRecordSaved) {
+        for (const record of records) {
+          await onRecordSaved('archives', record, 'create', {
+            actor: req.authUser,
+            previousRecord: null
+          });
+        }
+      }
+
+      return res.status(201).json(
+        records.map(record => sanitizeResourceRecord('archives', record))
+      );
+    } catch (error) {
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: 'Record id already exists' });
+      }
+      return next(error);
+    }
+  });
+
   router.use('/:resource', requireKnownResource, requireAuth);
+
+  router.patch('/archives/:id/name', async (req, res, next) => {
+    const { id } = req.params;
+    try {
+      if (!isRecord(req.body)) {
+        return res.status(400).json({ error: 'Record body must be an object' });
+      }
+      const previousRecord = await readJsonRecord(pool, 'archives', id);
+      if (!previousRecord) {
+        return res.status(404).json({ error: 'Record not found' });
+      }
+      if (!canRenameArchive(req.authUser, previousRecord)) {
+        return res.status(403).json({ error: 'Archive rename access denied' });
+      }
+      const normalized = normalizeArchiveTitle(req.body.title);
+      if (normalized.error) {
+        return res.status(400).json({ error: normalized.error });
+      }
+
+      const record = {
+        ...previousRecord,
+        title: normalized.title,
+        ...(!previousRecord.uploaderId && previousRecord.uploader === req.authUser.nickname
+          ? { uploaderId: req.authUser.id }
+          : {})
+      };
+      await pool.query(
+        `REPLACE INTO \`archives\`
+          (id, json_data, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)`,
+        [id, JSON.stringify(record)]
+      );
+      if (onRecordSaved) {
+        await onRecordSaved('archives', record, 'update', {
+          actor: req.authUser,
+          previousRecord
+        });
+      }
+      return res.json(sanitizeResourceRecord('archives', record));
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   router.get('/:resource', async (req, res, next) => {
     const { resource } = req.params;
@@ -411,8 +569,27 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         record = {
           ...record,
           uploader: previousRecord.uploader || req.authUser.nickname,
+          uploaderId: previousRecord.uploaderId || (
+            previousRecord.uploader === req.authUser.nickname
+              ? req.authUser.id
+              : undefined
+          ),
           createdAt: previousRecord.createdAt || record.createdAt
         };
+        if (
+          record.url !== previousRecord.url ||
+          record.fileType !== previousRecord.fileType
+        ) {
+          return res.status(400).json({
+            error: 'Archive file reference and extension cannot be changed'
+          });
+        }
+        if (
+          record.title !== previousRecord.title &&
+          !canRenameArchive(req.authUser, previousRecord)
+        ) {
+          return res.status(403).json({ error: 'Archive rename access denied' });
+        }
         const validation = normalizeAndValidateArchive(
           record,
           policyContext.projects || [],

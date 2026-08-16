@@ -26,10 +26,11 @@ import {
   ProjectMediaType,
   User
 } from '../types';
-import { API_URL, apiFetch } from '../lib/api';
+import { API_URL, apiFetch, apiUpload } from '../lib/api';
 import {
   formatProjectMediaSize,
   getFileExtension,
+  getProjectMediaThumbnailUrl,
   getProjectMediaType,
   groupProjectMediaAlbums,
   projectMediaTitle,
@@ -41,6 +42,7 @@ interface ProjectMediaTimelineProps {
   archives: ArchiveItem[];
   currentUser: User;
   onAddArchive: (archive: ArchiveItem) => boolean | Promise<boolean>;
+  onAddArchives?: (archives: ArchiveItem[]) => boolean | Promise<boolean>;
   onDeleteArchive: (id: string) => void;
 }
 
@@ -48,6 +50,18 @@ type MediaFilter = 'all' | ProjectMediaType;
 type UploadFileState = {
   file: File;
   key: string;
+  resumeUploadId?: string;
+};
+
+type FileUploadProgress = {
+  percent: number;
+  speedBytesPerSecond: number;
+  remainingSeconds: number | null;
+  status: 'waiting' | 'optimizing' | 'uploading' | 'saving' | 'completed' | 'failed';
+  uploadedBytes: number;
+  totalBytes: number;
+  optimizedSize?: number;
+  error?: string;
 };
 
 type MediaAlbum = {
@@ -61,6 +75,10 @@ type MediaAlbum = {
 };
 
 const MAX_BATCH_FILES = 30;
+const MEDIA_RENDER_BATCH_SIZE = 24;
+const UPLOAD_CONCURRENCY = 2;
+const DEFAULT_VIDEO_CHUNK_SIZE = 4 * 1024 * 1024;
+const MAX_CHUNK_ATTEMPTS = 3;
 
 const localToday = () => {
   const now = new Date();
@@ -77,6 +95,68 @@ const createRecordId = () => {
 
 const getDownloadUrl = (url?: string) =>
   url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '#';
+
+const fallbackToOriginalImage = (
+  event: React.SyntheticEvent<HTMLImageElement>,
+  originalUrl?: string
+) => {
+  const image = event.currentTarget;
+  if (!originalUrl || image.dataset.originalFallback === 'true') return;
+  image.dataset.originalFallback = 'true';
+  image.src = originalUrl;
+};
+
+const formatUploadSpeed = (bytesPerSecond: number) => (
+  bytesPerSecond > 0 ? `${formatProjectMediaSize(bytesPerSecond)}/秒` : '计算中'
+);
+
+const formatRemainingTime = (seconds: number | null) => {
+  if (seconds === null || !Number.isFinite(seconds)) return '计算中';
+  if (seconds < 60) return `约 ${Math.max(1, Math.ceil(seconds))} 秒`;
+  return `约 ${Math.ceil(seconds / 60)} 分钟`;
+};
+
+const wait = (milliseconds: number) => new Promise(resolve => {
+  window.setTimeout(resolve, milliseconds);
+});
+
+const optimizeImage = async (file: File) => {
+  const extension = getFileExtension(file.name).toLowerCase();
+  if (!['jpg', 'jpeg', 'png', 'webp'].includes(extension)) return file;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2560 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      bitmap.close();
+      return file;
+    }
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+
+    const mimeType = extension === 'png'
+      ? 'image/png'
+      : extension === 'webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+    const blob = await new Promise<Blob | null>(resolve => {
+      canvas.toBlob(resolve, mimeType, mimeType === 'image/png' ? undefined : 0.85);
+    });
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name, {
+      type: mimeType,
+      lastModified: file.lastModified
+    });
+  } catch {
+    return file;
+  }
+};
 
 const phaseShortNames: Record<ProjectMediaPhase, string> = {
   '前期对接 & 设计': '前期设计',
@@ -98,12 +178,14 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
   archives,
   currentUser,
   onAddArchive,
+  onAddArchives,
   onDeleteArchive
 }) => {
   const [activePhase, setActivePhase] = useState<'All' | ProjectMediaPhase>('All');
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null);
+  const [visibleMediaCount, setVisibleMediaCount] = useState(MEDIA_RENDER_BATCH_SIZE);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<UploadFileState[]>([]);
@@ -116,8 +198,11 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
   const [description, setDescription] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
+  const [fileProgress, setFileProgress] = useState<Record<string, FileUploadProgress>>({});
+  const [optimizePhotos, setOptimizePhotos] = useState(true);
   const [formError, setFormError] = useState('');
   const [maxFileSize, setMaxFileSize] = useState<number | null>(null);
+  const [videoChunkSize, setVideoChunkSize] = useState(DEFAULT_VIDEO_CHUNK_SIZE);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canWrite = currentUser.role === 'Admin' ||
@@ -132,6 +217,9 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
         const data = await response.json();
         if (active && Number.isFinite(data?.maxFileSize)) {
           setMaxFileSize(Number(data.maxFileSize));
+        }
+        if (active && Number.isFinite(data?.videoChunkSize)) {
+          setVideoChunkSize(Number(data.videoChunkSize));
         }
       })
       .catch(() => undefined);
@@ -184,13 +272,28 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     availableNodes.find(node => node.id === uploadNodeId)?.title
   );
 
+  const visibleAlbums = useMemo(
+    () => filteredAlbums.slice(0, visibleMediaCount),
+    [filteredAlbums, visibleMediaCount]
+  );
+  const albumCountsByDate = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const album of filteredAlbums) {
+      counts.set(album.capturedAt, (counts.get(album.capturedAt) || 0) + 1);
+    }
+    return counts;
+  }, [filteredAlbums]);
   const dateGroups = useMemo(() => {
     const groups = new Map<string, MediaAlbum[]>();
-    for (const album of filteredAlbums) {
+    for (const album of visibleAlbums) {
       groups.set(album.capturedAt, [...(groups.get(album.capturedAt) || []), album]);
     }
     return [...groups.entries()];
-  }, [filteredAlbums]);
+  }, [visibleAlbums]);
+  const visibleActiveAlbumItems = activeAlbum?.items.slice(0, visibleMediaCount) || [];
+  const hasMoreMedia = activeAlbum
+    ? activeAlbum.items.length > visibleMediaCount
+    : filteredAlbums.length > visibleMediaCount;
 
   const previewItems = activeAlbum?.items || filteredMedia;
   const previewIndex = previewItems.findIndex(item => item.id === previewId);
@@ -233,6 +336,8 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     setAlbumTitle('');
     setDescription('');
     setUploadProgress('');
+    setFileProgress({});
+    setOptimizePhotos(true);
     setFormError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -242,14 +347,27 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     setIsUploadOpen(true);
   };
 
+  const cleanupChunkUpload = async (uploadId?: string) => {
+    if (!uploadId) return;
+    await apiFetch(`${API_URL}/upload/chunks/${uploadId}`, {
+      method: 'DELETE'
+    }).catch(() => undefined);
+  };
+
+  const discardUploadFiles = (items: UploadFileState[]) => {
+    void Promise.all(items.map(item => cleanupChunkUpload(item.resumeUploadId)));
+  };
+
   const closeUpload = () => {
     if (isUploading) return;
+    discardUploadFiles(uploadFiles);
     setIsUploadOpen(false);
     resetUploadForm();
   };
 
   const handleSelectedFiles = (files: FileList | null) => {
     if (!files) return;
+    discardUploadFiles(uploadFiles);
     const selected = Array.from(files).slice(0, MAX_BATCH_FILES);
     const rejected: string[] = [];
     const nextFiles: UploadFileState[] = [];
@@ -273,6 +391,17 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     }
 
     setUploadFiles(nextFiles);
+    setFileProgress(Object.fromEntries(nextFiles.map(item => [
+      item.key,
+      {
+        percent: 0,
+        speedBytesPerSecond: 0,
+        remainingSeconds: null,
+        status: 'waiting',
+        uploadedBytes: 0,
+        totalBytes: item.file.size
+      }
+    ])));
     setFormError(
       rejected.length > 0
         ? `以下文件未加入：${rejected.slice(0, 3).join('、')}${rejected.length > 3 ? '等' : ''}`
@@ -289,59 +418,227 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
     }).catch(() => undefined);
   };
 
-  const uploadOneFile = async (file: File) => {
-    const mediaType = getProjectMediaType(file.name);
+  const updateFileProgress = (
+    key: string,
+    update: Partial<FileUploadProgress>
+  ) => {
+    setFileProgress(previous => ({
+      ...previous,
+      [key]: {
+        ...(previous[key] || {
+          percent: 0,
+          speedBytesPerSecond: 0,
+          remainingSeconds: null,
+          status: 'waiting',
+          uploadedBytes: 0,
+          totalBytes: 0
+        }),
+        ...update
+      }
+    }));
+  };
+
+  const createProgressReporter = (item: UploadFileState, totalBytes: number) => {
+    let startedAt = performance.now();
+    let speedBaselineBytes = 0;
+    let maximumUploaded = 0;
+    return (uploadedBytes: number, resetSpeedBaseline = false) => {
+      maximumUploaded = Math.max(maximumUploaded, uploadedBytes);
+      if (resetSpeedBaseline) {
+        speedBaselineBytes = maximumUploaded;
+        startedAt = performance.now();
+      }
+      const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.25);
+      const speedBytesPerSecond = Math.max(0, maximumUploaded - speedBaselineBytes) /
+        elapsedSeconds;
+      const remainingBytes = Math.max(0, totalBytes - maximumUploaded);
+      updateFileProgress(item.key, {
+        status: 'uploading',
+        percent: totalBytes > 0
+          ? Math.min(100, Math.round((maximumUploaded / totalBytes) * 100))
+          : 0,
+        speedBytesPerSecond,
+        remainingSeconds: speedBytesPerSecond > 0
+          ? remainingBytes / speedBytesPerSecond
+          : null,
+        uploadedBytes: maximumUploaded,
+        totalBytes
+      });
+    };
+  };
+
+  const uploadPhoto = async (
+    item: UploadFileState,
+    file: File,
+    reportProgress: (uploadedBytes: number, resetSpeedBaseline?: boolean) => void
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiUpload(`${API_URL}/upload`, {
+      body: formData,
+      onProgress: loaded => reportProgress(loaded)
+    });
+    if (!response.ok) {
+      throw new Error(
+        response.status === 413
+          ? '文件超过服务器上传上限'
+          : response.data?.error || '文件上传失败'
+      );
+    }
+    reportProgress(file.size);
+    return response.data;
+  };
+
+  const uploadVideo = async (
+    item: UploadFileState,
+    file: File,
+    reportProgress: (uploadedBytes: number, resetSpeedBaseline?: boolean) => void
+  ) => {
+    const extension = getFileExtension(file.name).toLowerCase();
+    const mimeType = file.type || ({
+      mp4: 'video/mp4',
+      mov: 'video/quicktime',
+      webm: 'video/webm'
+    } as Record<string, string>)[extension];
+    const initResponse = await apiFetch(`${API_URL}/upload/chunks/init`, {
+      method: 'POST',
+      json: {
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType,
+        ...(item.resumeUploadId ? { uploadId: item.resumeUploadId } : {})
+      }
+    });
+    const initData = await initResponse.json().catch(() => ({}));
+    if (!initResponse.ok) {
+      throw new Error(initData?.error || '无法创建视频上传任务');
+    }
+
+    item.resumeUploadId = initData.uploadId;
+    setUploadFiles(previous => previous.map(candidate =>
+      candidate.key === item.key
+        ? { ...candidate, resumeUploadId: initData.uploadId }
+        : candidate
+    ));
+    if (initData.completedUpload?.url) {
+      reportProgress(file.size);
+      return initData.completedUpload;
+    }
+
+    const chunkSize = Number(initData.chunkSize) || videoChunkSize;
+    const chunkCount = Number(initData.chunkCount);
+    const uploadedChunks = new Set<number>(
+      Array.isArray(initData.uploadedChunks) ? initData.uploadedChunks : []
+    );
+    let completedBytes = 0;
+    for (const index of uploadedChunks) {
+      completedBytes += Math.min(chunkSize, file.size - index * chunkSize);
+    }
+    reportProgress(completedBytes, true);
+
+    for (let index = 0; index < chunkCount; index += 1) {
+      if (uploadedChunks.has(index)) continue;
+      const start = index * chunkSize;
+      const end = Math.min(file.size, start + chunkSize);
+      const chunk = file.slice(start, end);
+      let uploadedInChunk = 0;
+      let lastError = '分片上传失败';
+
+      for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt += 1) {
+        const response = await apiUpload(
+          `${API_URL}/upload/chunks/${initData.uploadId}/${index}`,
+          {
+            method: 'PUT',
+            body: chunk,
+            headers: { 'Content-Type': 'application/octet-stream' },
+            onProgress: loaded => {
+              uploadedInChunk = Math.max(uploadedInChunk, loaded);
+              reportProgress(completedBytes + uploadedInChunk);
+            }
+          }
+        ).catch(error => ({
+          ok: false,
+          status: 0,
+          data: { error: error instanceof Error ? error.message : '网络连接中断' }
+        }));
+        if (response.ok) {
+          completedBytes += chunk.size;
+          reportProgress(completedBytes);
+          lastError = '';
+          break;
+        }
+        lastError = response.data?.error || `分片上传失败（${response.status}）`;
+        if (attempt < MAX_CHUNK_ATTEMPTS) {
+          await wait(500 * 2 ** (attempt - 1));
+        }
+      }
+      if (lastError) throw new Error(lastError);
+    }
+
+    const completeResponse = await apiFetch(
+      `${API_URL}/upload/chunks/${initData.uploadId}/complete`,
+      { method: 'POST', json: {} }
+    );
+    const completeData = await completeResponse.json().catch(() => ({}));
+    if (!completeResponse.ok) {
+      throw new Error(completeData?.error || '视频合并失败');
+    }
+    reportProgress(file.size);
+    return completeData;
+  };
+
+  const uploadOneFile = async (item: UploadFileState) => {
+    const mediaType = getProjectMediaType(item.file.name);
     if (!mediaType) throw new Error('不支持的文件格式');
-    if (maxFileSize !== null && file.size > maxFileSize) {
+    if (maxFileSize !== null && item.file.size > maxFileSize) {
       throw new Error(`超过 ${formatProjectMediaSize(maxFileSize)} 上传上限`);
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
-    const uploadResponse = await apiFetch(`${API_URL}/upload`, {
-      method: 'POST',
-      body: formData
-    });
-    const uploadData = await uploadResponse.json().catch(() => ({}));
-    if (!uploadResponse.ok) {
-      throw new Error(
-        uploadResponse.status === 413
-          ? '文件超过服务器上传上限'
-          : uploadData?.error || '文件上传失败'
-      );
+    let uploadFile = item.file;
+    if (mediaType === 'image' && optimizePhotos) {
+      updateFileProgress(item.key, { status: 'optimizing' });
+      uploadFile = await optimizeImage(item.file);
+      updateFileProgress(item.key, {
+        optimizedSize: uploadFile.size,
+        totalBytes: uploadFile.size
+      });
     }
+    const reportProgress = createProgressReporter(item, uploadFile.size);
+    const uploadData = mediaType === 'video'
+      ? await uploadVideo(item, uploadFile, reportProgress)
+      : await uploadPhoto(item, uploadFile, reportProgress);
 
-    try {
-      const now = new Date().toISOString();
-      const archive: ArchiveItem = {
-        id: createRecordId(),
-        title: projectMediaTitle(file.name),
-        category: 'Media',
-        projectName: project.name,
-        projectId: project.id,
-        fileType: getFileExtension(file.name).toUpperCase(),
-        size: formatProjectMediaSize(file.size),
-        uploadDate: now,
-        uploader: currentUser.nickname,
-        url: uploadData.url,
-        createdAt: now,
-        mediaPhase: uploadPhase,
-        capturedAt,
-        mediaType,
-        description: description.trim(),
-        mediaAlbumId: uploadAlbumId,
-        mediaAlbumTitle: albumTitle.trim(),
-        ...(uploadNodeId ? {
-          workflowNodeId: uploadNodeId,
-          workflowNodeTitle: availableNodes.find(node => node.id === uploadNodeId)?.title
-        } : {})
-      };
-      const saved = await onAddArchive(archive);
-      if (!saved) throw new Error('影像档案保存失败');
-    } catch (error) {
-      await cleanupUpload(uploadData.filename, uploadData.cleanupToken);
-      throw error;
-    }
+    const now = new Date().toISOString();
+    const archive: ArchiveItem = {
+      id: createRecordId(),
+      title: projectMediaTitle(item.file.name),
+      category: 'Media',
+      projectName: project.name,
+      projectId: project.id,
+      fileType: getFileExtension(uploadFile.name).toUpperCase(),
+      size: formatProjectMediaSize(uploadFile.size),
+      uploadDate: now,
+      uploader: currentUser.nickname,
+      url: uploadData.url,
+      createdAt: now,
+      mediaPhase: uploadPhase,
+      capturedAt,
+      mediaType,
+      description: description.trim(),
+      mediaAlbumId: uploadAlbumId,
+      mediaAlbumTitle: albumTitle.trim(),
+      ...(uploadNodeId ? {
+        workflowNodeId: uploadNodeId,
+        workflowNodeTitle: availableNodes.find(node => node.id === uploadNodeId)?.title
+      } : {})
+    };
+    updateFileProgress(item.key, {
+      status: 'saving',
+      percent: 100,
+      uploadedBytes: uploadFile.size,
+      remainingSeconds: 0
+    });
+    return { archive, uploadData };
   };
 
   const handleUpload = async () => {
@@ -352,33 +649,77 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
 
     setIsUploading(true);
     setFormError('');
-    const failed: UploadFileState[] = [];
+    setUploadProgress(`最多 ${UPLOAD_CONCURRENCY} 个文件并发上传`);
+    const failed = new Map<string, UploadFileState>();
     const errors: string[] = [];
-    let succeeded = 0;
+    const uploaded: Array<{
+      item: UploadFileState;
+      archive: ArchiveItem;
+      uploadData: { filename?: string; cleanupToken?: string };
+    }> = [];
+    let savedCount = 0;
+    let nextIndex = 0;
 
-    for (let index = 0; index < uploadFiles.length; index += 1) {
-      const item = uploadFiles[index];
-      setUploadProgress(`正在保存 ${index + 1} / ${uploadFiles.length}：${item.file.name}`);
-      try {
-        await uploadOneFile(item.file);
-        succeeded += 1;
-      } catch (error) {
-        failed.push(item);
-        errors.push(`${item.file.name}：${error instanceof Error ? error.message : '上传失败'}`);
+    const worker = async () => {
+      while (nextIndex < uploadFiles.length) {
+        const item = uploadFiles[nextIndex];
+        nextIndex += 1;
+        try {
+          const result = await uploadOneFile(item);
+          uploaded.push({ item, ...result });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '上传失败';
+          failed.set(item.key, item);
+          errors.push(`${item.file.name}：${message}`);
+          updateFileProgress(item.key, { status: 'failed', error: message });
+        }
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(UPLOAD_CONCURRENCY, uploadFiles.length) },
+        () => worker()
+      )
+    );
+
+    if (uploaded.length > 0) {
+      setUploadProgress(`正在批量保存 ${uploaded.length} 条影像档案记录`);
+      const archivesToSave = uploaded.map(result => result.archive);
+      const saved = onAddArchives
+        ? await onAddArchives(archivesToSave)
+        : (await Promise.all(archivesToSave.map(onAddArchive))).every(Boolean);
+      if (!saved) {
+        await Promise.all(uploaded.map(result =>
+          cleanupUpload(result.uploadData.filename, result.uploadData.cleanupToken)
+        ));
+        for (const result of uploaded) {
+          failed.set(result.item.key, result.item);
+          updateFileProgress(result.item.key, {
+            status: 'failed',
+            error: '影像档案批量保存失败'
+          });
+        }
+        errors.push('影像档案批量保存失败，已清理本批上传文件');
+      } else {
+        savedCount = uploaded.length;
+        for (const result of uploaded) {
+          updateFileProgress(result.item.key, { status: 'completed' });
+        }
       }
     }
 
     setIsUploading(false);
     setUploadProgress('');
-    if (failed.length === 0) {
+    if (failed.size === 0) {
       setIsUploadOpen(false);
       resetUploadForm();
       return;
     }
 
-    setUploadFiles(failed);
+    const failedFiles = uploadFiles.filter(item => failed.has(item.key));
+    setUploadFiles(failedFiles);
     setFormError(
-      `${succeeded > 0 ? `已保存 ${succeeded} 个，` : ''}失败 ${failed.length} 个：` +
+      `${savedCount > 0 ? `已保存 ${savedCount} 个，` : ''}失败 ${failedFiles.length} 个：` +
       `${errors.slice(0, 2).join('；')}${errors.length > 2 ? '；其余请重试' : ''}`
     );
   };
@@ -403,13 +744,9 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
       >
         {item.mediaType === 'video' ? (
           <>
-            <video
-              src={item.url}
-              muted
-              playsInline
-              preload="metadata"
-              className="h-full w-full object-cover opacity-85 transition duration-300 group-hover:scale-[1.03]"
-            />
+            <span className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 via-slate-950 to-black text-slate-500">
+              <Video className="h-14 w-14" />
+            </span>
             <span className="absolute inset-0 flex items-center justify-center">
               <span className="flex h-12 w-12 items-center justify-center rounded-full border border-white/50 bg-slate-950/65 text-white shadow-xl backdrop-blur-sm">
                 <Play className="ml-0.5 h-5 w-5 fill-current" />
@@ -418,9 +755,11 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
           </>
         ) : (
           <img
-            src={item.url}
+            src={getProjectMediaThumbnailUrl(item.url, 640)}
             alt={item.title}
             loading="lazy"
+            decoding="async"
+            onError={event => fallbackToOriginalImage(event, item.url)}
             className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
           />
         )}
@@ -496,6 +835,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
               onClick={() => {
                 setActivePhase('All');
                 setActiveAlbumId(null);
+                setVisibleMediaCount(MEDIA_RENDER_BATCH_SIZE);
               }}
               className={`min-w-24 rounded-2xl border px-4 py-3 text-left transition focus:outline-none focus:ring-4 focus:ring-primary-400/30 ${
                 activePhase === 'All'
@@ -514,6 +854,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                 onClick={() => {
                   setActivePhase(phase);
                   setActiveAlbumId(null);
+                  setVisibleMediaCount(MEDIA_RENDER_BATCH_SIZE);
                 }}
                 className={`group min-w-32 rounded-2xl border px-4 py-3 text-left transition focus:outline-none focus:ring-4 focus:ring-primary-400/30 ${
                   activePhase === phase
@@ -542,7 +883,10 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
           <input
             type="search"
             value={searchTerm}
-            onChange={event => setSearchTerm(event.target.value)}
+            onChange={event => {
+              setSearchTerm(event.target.value);
+              setVisibleMediaCount(MEDIA_RENDER_BATCH_SIZE);
+            }}
             placeholder="搜索标题、说明或上传人"
             className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm font-bold text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
           />
@@ -556,7 +900,10 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
             <button
               key={id}
               type="button"
-              onClick={() => setMediaFilter(id)}
+              onClick={() => {
+                setMediaFilter(id);
+                setVisibleMediaCount(MEDIA_RENDER_BATCH_SIZE);
+              }}
               className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                 mediaFilter === id
                   ? 'bg-white text-primary-700 shadow-sm dark:bg-slate-700 dark:text-primary-300'
@@ -576,7 +923,10 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
             <div className="flex min-w-0 items-center gap-3">
               <button
                 type="button"
-                onClick={() => setActiveAlbumId(null)}
+                onClick={() => {
+                  setActiveAlbumId(null);
+                  setVisibleMediaCount(MEDIA_RENDER_BATCH_SIZE);
+                }}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-primary-50 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-slate-900 dark:text-slate-300"
                 aria-label="返回影像文件夹列表"
               >
@@ -601,7 +951,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-            {activeAlbum.items.map(renderMediaCard)}
+            {visibleActiveAlbumItems.map(renderMediaCard)}
           </div>
         </section>
       ) : dateGroups.length > 0 ? (
@@ -617,7 +967,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     {date}
                   </h4>
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                    当日 {albums.length} 个影像文件夹
+                    当日 {albumCountsByDate.get(date) || albums.length} 个影像文件夹
                   </p>
                 </div>
                 <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
@@ -631,24 +981,25 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     <button
                       key={album.id}
                       type="button"
-                      onClick={() => setActiveAlbumId(album.id)}
+                      onClick={() => {
+                        setActiveAlbumId(album.id);
+                        setVisibleMediaCount(MEDIA_RENDER_BATCH_SIZE);
+                      }}
                       className="group overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-primary-500/20 dark:border-slate-700 dark:bg-slate-800"
                       aria-label={`打开影像文件夹 ${album.title}`}
                     >
                       <span className="relative block aspect-[4/3] overflow-hidden bg-slate-900">
                         {cover?.mediaType === 'video' ? (
-                          <video
-                            src={cover.url}
-                            muted
-                            playsInline
-                            preload="metadata"
-                            className="h-full w-full object-cover opacity-85 transition duration-300 group-hover:scale-[1.03]"
-                          />
+                          <span className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 via-slate-950 to-black text-slate-500">
+                            <Video className="h-14 w-14" />
+                          </span>
                         ) : (
                           <img
-                            src={cover?.url}
+                            src={getProjectMediaThumbnailUrl(cover?.url, 640)}
                             alt=""
                             loading="lazy"
+                            decoding="async"
+                            onError={event => fallbackToOriginalImage(event, cover?.url)}
                             className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
                           />
                         )}
@@ -701,6 +1052,21 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
               上传第一批影像
             </button>
           )}
+        </div>
+      )}
+
+      {hasMoreMedia && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setVisibleMediaCount(count => count + MEDIA_RENDER_BATCH_SIZE)}
+            className="min-h-11 rounded-xl border-2 border-slate-200 bg-white px-6 text-sm font-black text-slate-600 transition hover:border-primary-300 hover:text-primary-700 focus:outline-none focus:ring-4 focus:ring-primary-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          >
+            再加载 {Math.min(
+              MEDIA_RENDER_BATCH_SIZE,
+              (activeAlbum?.items.length || filteredAlbums.length) - visibleMediaCount
+            )} 项
+          </button>
         </div>
       )}
 
@@ -861,6 +1227,24 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                 />
               </label>
 
+              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-primary-100 bg-primary-50/70 px-4 py-3 dark:border-primary-900 dark:bg-primary-950/20">
+                <input
+                  type="checkbox"
+                  checked={optimizePhotos}
+                  onChange={event => setOptimizePhotos(event.target.checked)}
+                  disabled={isUploading}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500 disabled:opacity-60"
+                />
+                <span>
+                  <span className="block text-xs font-black text-slate-800 dark:text-slate-100">
+                    优化照片（推荐）
+                  </span>
+                  <span className="mt-1 block text-[10px] font-bold leading-4 text-slate-500 dark:text-slate-400">
+                    长边压缩至最多 2560px，JPG/WEBP 质量约 85%；取消勾选可上传原图，GIF 保持原文件。
+                  </span>
+                </span>
+              </label>
+
               <div className="mt-4">
                 <button
                   type="button"
@@ -898,7 +1282,11 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     {!isUploading && (
                       <button
                         type="button"
-                        onClick={() => setUploadFiles([])}
+                        onClick={() => {
+                          discardUploadFiles(uploadFiles);
+                          setUploadFiles([]);
+                          setFileProgress({});
+                        }}
                         className="text-[10px] font-black text-slate-400 hover:text-red-600"
                       >
                         清空
@@ -906,12 +1294,59 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                     )}
                   </div>
                   <div className="max-h-36 space-y-1 overflow-y-auto">
-                    {uploadFiles.map(item => (
-                      <div key={item.key} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs dark:bg-slate-800">
-                        <span className="min-w-0 truncate font-bold text-slate-700 dark:text-slate-200">{item.file.name}</span>
-                        <span className="shrink-0 font-black text-slate-400">{formatProjectMediaSize(item.file.size)}</span>
-                      </div>
-                    ))}
+                    {uploadFiles.map(item => {
+                      const progress = fileProgress[item.key];
+                      return (
+                        <div key={item.key} className="rounded-lg bg-white px-3 py-2 text-xs dark:bg-slate-800">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate font-bold text-slate-700 dark:text-slate-200">{item.file.name}</span>
+                            <span className="shrink-0 font-black text-slate-400">
+                              {progress?.optimizedSize && progress.optimizedSize < item.file.size
+                                ? `${formatProjectMediaSize(item.file.size)} → ${formatProjectMediaSize(progress.optimizedSize)}`
+                                : formatProjectMediaSize(item.file.size)}
+                            </span>
+                          </div>
+                          {progress && progress.status !== 'waiting' && (
+                            <div className="mt-2">
+                              <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+                                <div
+                                  className={`h-full rounded-full transition-[width] ${
+                                    progress.status === 'failed'
+                                      ? 'bg-red-500'
+                                      : progress.status === 'completed'
+                                        ? 'bg-emerald-500'
+                                        : 'bg-primary-500'
+                                  }`}
+                                  style={{ width: `${progress.percent}%` }}
+                                />
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[9px] font-black">
+                                <span className={
+                                  progress.status === 'failed'
+                                    ? 'text-red-600 dark:text-red-300'
+                                    : 'text-primary-600 dark:text-primary-300'
+                                }>
+                                  {progress.status === 'optimizing'
+                                    ? '正在优化照片'
+                                    : progress.status === 'saving'
+                                      ? '上传完成，等待保存档案'
+                                      : progress.status === 'completed'
+                                        ? '已完成'
+                                        : progress.status === 'failed'
+                                          ? progress.error || '上传失败'
+                                          : `${progress.percent}%`}
+                                </span>
+                                {progress.status === 'uploading' && (
+                                  <span className="text-slate-400">
+                                    {formatUploadSpeed(progress.speedBytesPerSecond)} · 剩余 {formatRemainingTime(progress.remainingSeconds)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1004,6 +1439,7 @@ const ProjectMediaTimeline: React.FC<ProjectMediaTimelineProps> = ({
                 <img
                   src={previewItem.url}
                   alt={previewItem.title}
+                  decoding="async"
                   className="max-h-full max-w-full object-contain"
                 />
               )}

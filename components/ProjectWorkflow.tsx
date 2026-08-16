@@ -3,25 +3,33 @@ import React, { useState, useMemo } from 'react';
 import ProjectSummary from './ProjectSummary';
 import TaskDetailModal from './TaskDetailModal';
 import ProjectMediaTimeline from './ProjectMediaTimeline';
-import { WorkflowNode, TaskStatus, Project, ArchiveItem, User, Approval } from '../types';
+import { WorkflowNode, TaskStatus, Project, ArchiveItem, User, Approval, Attachment } from '../types';
 import { INITIAL_WORKFLOW } from '../constants';
 import { Check, ChevronRight, AlertCircle, FileText, Calendar, ArrowLeft, RefreshCw, User as UserIcon, Filter, Search, ArrowRight, Layers, CheckCircle2, Circle, Images, ListChecks } from 'lucide-react';
 
 interface ProjectWorkflowProps {
   project: Project;
   nodes: WorkflowNode[];
-  onUpdateNode: (updatedNode: WorkflowNode) => void;
-  onUpdateProject?: (project: Project) => void;
+  onUpdateNode: (updatedNode: WorkflowNode) => boolean | Promise<boolean>;
+  onUpdateProject?: (project: Project) => boolean | Promise<boolean>;
   onBack: () => void;
   onAddArchive: (archive: ArchiveItem) => boolean | Promise<boolean>;
-  onDeleteArchive: (id: string) => void;
+  onAddArchives?: (archives: ArchiveItem[]) => boolean | Promise<boolean>;
+  onDeleteArchive: (
+    id: string,
+    context?: {
+      projectId: string;
+      nodeId: string;
+      attachment: Attachment;
+    }
+  ) => void;
   archives?: ArchiveItem[];
   currentUser: User;
   users?: User[]; 
   backLabel?: string;
 }
 
-const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpdateNode, onUpdateProject, onBack, onAddArchive, onDeleteArchive, archives, currentUser, users = [], backLabel = '返回项目台账' }) => {
+const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpdateNode, onUpdateProject, onBack, onAddArchive, onAddArchives, onDeleteArchive, archives, currentUser, users = [], backLabel = '返回项目台账' }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'workflow' | 'media'>('workflow');
   const [taskFilter, setTaskFilter] = useState<'All' | 'Key' | 'Pending' | 'Mine'>('All');
@@ -68,19 +76,36 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
 
   const getStatusBorderClass = (status: TaskStatus) => {
     switch (status) {
-      case TaskStatus.COMPLETED: return 'border-l-emerald-500';
-      case TaskStatus.IN_PROGRESS: return 'border-l-primary-500';
-      case TaskStatus.BLOCKED: return 'border-l-red-500'; 
-      default: return 'border-l-slate-400';
+      case TaskStatus.COMPLETED:
+        return 'border-l-emerald-500 hover:border-l-emerald-500';
+      case TaskStatus.IN_PROGRESS:
+        return 'border-l-blue-500 hover:border-l-blue-500';
+      case TaskStatus.BLOCKED:
+        return 'border-l-red-500 hover:border-l-red-500';
+      default:
+        return 'border-l-slate-400 hover:border-l-slate-400';
     }
   };
 
   const getStatusDotClass = (status: TaskStatus) => {
     switch (status) {
       case TaskStatus.COMPLETED: return 'bg-emerald-500';
-      case TaskStatus.IN_PROGRESS: return 'bg-primary-500';
+      case TaskStatus.IN_PROGRESS: return 'bg-blue-500';
       case TaskStatus.BLOCKED: return 'bg-red-500';
       default: return 'bg-slate-400';
+    }
+  };
+
+  const getStatusTextClass = (status: TaskStatus) => {
+    switch (status) {
+      case TaskStatus.COMPLETED:
+        return 'text-emerald-700 dark:text-emerald-300';
+      case TaskStatus.IN_PROGRESS:
+        return 'text-blue-700 dark:text-blue-300';
+      case TaskStatus.BLOCKED:
+        return 'text-red-700 dark:text-red-300';
+      default:
+        return 'text-slate-500 dark:text-slate-400';
     }
   };
 
@@ -282,7 +307,7 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
                                     <div className="flex justify-between items-start mb-3 md:mb-4">
                                         <div className="flex items-center gap-1.5">
                                             <div className={`w-2 h-2 rounded-full ${getStatusDotClass(node.status)} shadow-sm group-hover:scale-110 transition-transform`} />
-                                            <span className="text-[7px] md:text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                                            <span className={`text-[7px] md:text-[9px] font-black uppercase tracking-wider ${getStatusTextClass(node.status)}`}>
                                                 {node.status === TaskStatus.PENDING ? '待办' : node.status === TaskStatus.IN_PROGRESS ? '进行中' : node.status === TaskStatus.COMPLETED ? '完结' : '受阻'}
                                             </span>
                                         </div>
@@ -341,6 +366,7 @@ const ProjectWorkflow: React.FC<ProjectWorkflowProps> = ({ project, nodes, onUpd
           archives={archives || []}
           currentUser={currentUser}
           onAddArchive={onAddArchive}
+          onAddArchives={onAddArchives}
           onDeleteArchive={onDeleteArchive}
         />
       )}

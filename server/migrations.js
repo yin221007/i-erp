@@ -276,6 +276,161 @@ async function normalizeProductionIds(connection) {
   }
 }
 
+async function alignProductionPrimaryKeys(connection) {
+  const [rows] = await connection.query(
+    'SELECT id, json_data FROM production ORDER BY id FOR UPDATE'
+  );
+  const stableIds = new Set();
+  const occupiedIds = new Set(rows.map(row => row.id));
+  const parsedRows = rows.map(row => {
+    const record = parseJson(row.json_data, `production/${row.id}`);
+    const stableId = record.id || record.projectId;
+    if (typeof stableId !== 'string' || !stableId.trim()) {
+      throw new Error(`Production record ${row.id} has no stable ID`);
+    }
+    if (stableIds.has(stableId)) {
+      throw new Error(`Duplicate production stable ID ${stableId}`);
+    }
+    stableIds.add(stableId);
+    record.id = stableId;
+    return { row, record, stableId };
+  });
+
+  const moves = parsedRows.flatMap(({ row, record, stableId }, index) => {
+    if (row.id === stableId) return [];
+
+    let temporaryId = `__ierp_prod_011_${index}__`;
+    while (occupiedIds.has(temporaryId) || stableIds.has(temporaryId)) {
+      temporaryId += '_';
+    }
+    occupiedIds.add(temporaryId);
+    return [{ oldId: row.id, temporaryId, stableId, record }];
+  });
+
+  // 先统一挪到临时主键，避免“A 的目标 ID 正好是 B 的旧主键”造成冲突。
+  for (const move of moves) {
+    await connection.query(
+      'UPDATE production SET id = ? WHERE id = ?',
+      [move.temporaryId, move.oldId]
+    );
+  }
+
+  for (const move of moves) {
+    await connection.query(
+      'UPDATE production SET id = ?, json_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [move.stableId, JSON.stringify(move.record), move.temporaryId]
+    );
+  }
+}
+
+function fileTypeFromAttachment(attachment) {
+  const name = typeof attachment?.name === 'string' ? attachment.name : '';
+  const extension = name.includes('.') ? name.split('.').pop() : '';
+  if (extension) return extension.toUpperCase();
+
+  const type = typeof attachment?.type === 'string' ? attachment.type : '';
+  return type.includes('/') ? type.split('/').pop().toUpperCase() : 'FILE';
+}
+
+async function backfillProjectAttachmentArchives(connection) {
+  const [projectRows] = await connection.query(
+    'SELECT id, json_data FROM projects ORDER BY id FOR UPDATE'
+  );
+  const [archiveRows] = await connection.query(
+    'SELECT id, json_data FROM archives ORDER BY id FOR UPDATE'
+  );
+  const existingArchives = archiveRows.map(row =>
+    parseJson(row.json_data, `archives/${row.id}`)
+  );
+  const existingIds = new Set(existingArchives.map(record => record.id));
+  const existingUrls = new Set(
+    existingArchives.map(record => record.url).filter(Boolean)
+  );
+
+  for (const row of projectRows) {
+    const project = parseJson(row.json_data, `projects/${row.id}`);
+    for (const node of project.nodes || []) {
+      for (const attachment of node.attachments || []) {
+        if (
+          !attachment?.id ||
+          existingIds.has(attachment.id) ||
+          (attachment.url && existingUrls.has(attachment.url))
+        ) {
+          continue;
+        }
+
+        const uploadDate = attachment.uploadDate || project.createdAt ||
+          new Date().toISOString();
+        const archive = {
+          id: attachment.id,
+          title: String(attachment.name || '历史流程附件').replace(/\.[^.]+$/, ''),
+          category: attachment.category || 'Other',
+          projectName: project.name,
+          projectId: project.id,
+          fileType: fileTypeFromAttachment(attachment),
+          size: attachment.size || '',
+          uploadDate,
+          uploader: project.manager || '历史数据',
+          url: attachment.url,
+          createdAt: uploadDate
+        };
+
+        await connection.query(
+          'INSERT INTO archives (id, json_data) VALUES (?, ?)',
+          [archive.id, JSON.stringify(archive)]
+        );
+        existingIds.add(archive.id);
+        if (archive.url) existingUrls.add(archive.url);
+      }
+    }
+  }
+}
+
+async function restoreAutoDeletedApprovalHistory(connection) {
+  const [rows] = await connection.query(
+    'SELECT id, json_data FROM recycle_bin ORDER BY id FOR UPDATE'
+  );
+
+  for (const row of rows) {
+    const recycleRecord = parseJson(
+      row.json_data,
+      `recycle_bin/${row.id}`
+    );
+    const approval = recycleRecord?.data;
+    const latestOutcomes = Array.isArray(approval?.versions?.[0]?.outcomes)
+      ? approval.versions[0].outcomes
+      : [];
+    const isAutoDeletedApproval =
+      recycleRecord?.resourceType === 'approvals' &&
+      approval?.type === 'Deletion' &&
+      approval?.status === 'Approved' &&
+      typeof recycleRecord?.originalId === 'string' &&
+      Boolean(approval?.relatedId) &&
+      latestOutcomes.length > 0;
+
+    if (!isAutoDeletedApproval) continue;
+
+    const [conflicts] = await connection.query(
+      'SELECT id FROM approvals WHERE id = ? FOR UPDATE',
+      [recycleRecord.originalId]
+    );
+    if (conflicts.length > 0) continue;
+
+    const restoredApproval = {
+      ...approval,
+      id: approval.id || recycleRecord.originalId
+    };
+    await connection.query(
+      'INSERT INTO approvals (id, json_data) VALUES (?, ?)',
+      [recycleRecord.originalId, JSON.stringify(restoredApproval)]
+    );
+    await connection.query(
+      'DELETE FROM recycle_bin WHERE id = ?',
+      [row.id]
+    );
+  }
+}
+
 const MIGRATIONS = Object.freeze([
   {
     version: '001_create_security_tables',
@@ -321,6 +476,21 @@ const MIGRATIONS = Object.freeze([
     version: '009_backfill_owner_scoped_resources',
     transactional: true,
     up: backfillOwnerScopedResources
+  },
+  {
+    version: '010_backfill_project_attachment_archives',
+    transactional: true,
+    up: backfillProjectAttachmentArchives
+  },
+  {
+    version: '011_align_production_primary_keys',
+    transactional: true,
+    up: alignProductionPrimaryKeys
+  },
+  {
+    version: '012_restore_auto_deleted_approval_history',
+    transactional: true,
+    up: restoreAutoDeletedApprovalHistory
   }
 ]);
 

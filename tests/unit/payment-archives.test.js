@@ -96,3 +96,82 @@ test('a stable project id never accepts another project invoice by client-name f
 
   assert.deepEqual(getInvoiceArchives(payment, projects, archives), []);
 });
+
+test('legacy invoice attachments in workflow nodes remain visible to payment preview', () => {
+  const project = {
+    ...oldTenthSchoolProject,
+    manager: '项目经理',
+    nodes: [{
+      id: 'invoice-node',
+      attachments: [{
+        id: 'legacy-node-invoice',
+        name: '历史流程发票.pdf',
+        url: '/api/uploads/legacy-invoice.pdf',
+        type: 'application/pdf',
+        size: '128 KB',
+        uploadDate: '2026-03-01T00:00:00.000Z',
+        category: 'Invoice'
+      }]
+    }]
+  };
+  const payment = {
+    ...oldTenthSchoolPayment,
+    projectId: project.id
+  };
+
+  const result = getInvoiceArchives(payment, [project], []);
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0], {
+    id: 'legacy-node-invoice',
+    title: '历史流程发票',
+    category: 'Invoice',
+    projectId: project.id,
+    projectName: project.name,
+    fileType: 'PDF',
+    size: '128 KB',
+    uploadDate: '2026-03-01T00:00:00.000Z',
+    createdAt: '2026-03-01T00:00:00.000Z',
+    uploader: '项目经理',
+    url: '/api/uploads/legacy-invoice.pdf'
+  });
+});
+
+test('formal invoice archive wins over the same workflow attachment', () => {
+  const project = {
+    ...oldTenthSchoolProject,
+    nodes: [{
+      id: 'invoice-node',
+      attachments: [{
+        id: 'same-invoice',
+        name: '节点名称.pdf',
+        url: '/api/uploads/same-invoice.pdf',
+        type: 'application/pdf',
+        size: '128 KB',
+        uploadDate: '2026-03-01T00:00:00.000Z',
+        category: 'Invoice'
+      }]
+    }]
+  };
+  const payment = {
+    ...oldTenthSchoolPayment,
+    projectId: project.id
+  };
+  const archive = {
+    id: 'same-invoice',
+    title: '正式档案名称',
+    category: 'Invoice',
+    projectId: project.id,
+    projectName: project.name,
+    fileType: 'PDF',
+    size: '128 KB',
+    uploadDate: '2026-03-01T00:00:00.000Z',
+    uploader: '上传人',
+    url: '/api/uploads/same-invoice.pdf'
+  };
+
+  assert.deepEqual(
+    getInvoiceArchives(payment, [project], [archive]),
+    [archive]
+  );
+});

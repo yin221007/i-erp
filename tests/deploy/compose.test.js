@@ -92,18 +92,38 @@ test('nginx exposes live and backend readiness checks with the upload limit', as
   assert.match(nginx, /location = \/health\/ready/);
   assert.match(nginx, /proxy_pass http:\/\/backend:3000\/health\/ready/);
   assert.match(nginx, /client_max_body_size 100M/);
+  assert.match(nginx, /location = \/api\/upload \{[\s\S]*proxy_request_buffering off;/);
+  assert.match(nginx, /location \^~ \/api\/upload\/chunks\/ \{[\s\S]*client_max_body_size 5M;/);
   assert.doesNotMatch(nginx, /51200M/);
 });
 
 test('nginx refreshes the app entry while caching hashed assets immutably', async () => {
   const nginx = await readFile(new URL('nginx.conf', root), 'utf8');
 
+  assert.match(
+    nginx,
+    /types\s*\{\s*application\/javascript\s+mjs;\s*\}/,
+    'PDF.js module workers must be served as JavaScript when nosniff is enabled'
+  );
   assert.match(nginx, /location \/assets\/ \{/);
   assert.match(nginx, /Cache-Control "public, max-age=31536000, immutable"/);
   assert.match(nginx, /Cache-Control "no-store, no-cache, must-revalidate"/);
   assert.match(nginx, /X-Content-Type-Options "nosniff"/);
   assert.match(nginx, /X-Frame-Options "SAMEORIGIN"/);
   assert.match(nginx, /Referrer-Policy "strict-origin-when-cross-origin"/);
+  assert.match(nginx, /Permissions-Policy/);
+  assert.match(nginx, /Content-Security-Policy/);
+  assert.match(nginx, /object-src 'none'/);
+  assert.match(nginx, /connect-src 'self' https:\/\/get\.geojs\.io https:\/\/api\.open-meteo\.com/);
+});
+
+test('nginx rate limits login without blocking a thirty-person office burst', async () => {
+  const nginx = await readFile(new URL('nginx.conf', root), 'utf8');
+
+  assert.match(nginx, /limit_req_zone \$binary_remote_addr zone=ierp_login:10m rate=30r\/m/);
+  assert.match(nginx, /location = \/api\/auth\/login/);
+  assert.match(nginx, /limit_req zone=ierp_login burst=30 nodelay/);
+  assert.match(nginx, /limit_req_status 429/);
 });
 
 test('application backends run as the Synology deployment identity', async () => {
@@ -119,6 +139,17 @@ test('application backends run as the Synology deployment identity', async () =>
   for (const backend of [base.services.backend, blue.services.backend, green.services.backend]) {
     assert.match(backend.user, /NAS_UID/);
     assert.match(backend.user, /NAS_GID/);
+    assert.equal(backend.read_only, true);
+    assert.deepEqual(backend.cap_drop, ['ALL']);
+    assert.ok(backend.tmpfs.some(entry => entry.startsWith('/tmp:')));
+  }
+  for (const frontend of [
+    base.services.frontend,
+    blue.services.frontend,
+    green.services.frontend
+  ]) {
+    assert.deepEqual(frontend.cap_drop, ['ALL']);
+    assert.ok(frontend.cap_add.includes('NET_BIND_SERVICE'));
   }
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /chmod 0444 \/app\/server\.js/);
@@ -126,6 +157,11 @@ test('application backends run as the Synology deployment identity', async () =>
   assert.match(backupDockerfile, /chmod -R a=rX \/app\/scripts \/app\/server/);
   assert.doesNotMatch(dockerfile, /chmod 777/);
   assert.doesNotMatch(backupDockerfile, /chmod 777/);
+  for (const serviceName of ['backup', 'backup-scheduler']) {
+    assert.equal(base.services[serviceName].read_only, true);
+    assert.deepEqual(base.services[serviceName].cap_drop, ['ALL']);
+    assert.ok(base.services[serviceName].tmpfs.some(entry => entry.startsWith('/tmp:')));
+  }
 });
 
 test('the base stack contains no production host literals and bounds backups', async () => {

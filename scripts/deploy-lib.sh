@@ -93,6 +93,29 @@ verify_restore_drill() {
     die "Restore drill marker does not match the current snapshot manifest"
 }
 
+compose_with_clean_env_file() {
+  local env_file="$1"
+  shift
+
+  [[ -f "$env_file" ]] || die "Compose environment file does not exist: $env_file"
+
+  # Compose gives exported shell variables precedence over --env-file. Run the
+  # preserved stack in a subshell with every variable declared by its own env
+  # file unset, so a candidate release cannot leak its image tag or paths into
+  # rollback/restart operations.
+  (
+    local variable_name
+    while IFS= read -r variable_name; do
+      unset "$variable_name"
+    done < <(
+      sed -nE \
+        's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' \
+        "$env_file"
+    )
+    docker compose --env-file "$env_file" "$@"
+  )
+}
+
 confirm_gate() {
   local variable_name="$1"
   local expected_value="$2"
@@ -134,18 +157,49 @@ database_count() {
     --execute="SELECT COUNT(*) FROM \`$table_name\`"
 }
 
+expected_table_count_delta() {
+  local table_name="$1"
+  local specification="${EXPECTED_TABLE_COUNT_DELTAS:-}"
+  local entry configured_table configured_delta matched_delta=""
+  local -a entries
+
+  [[ -n "$specification" ]] || {
+    printf '0'
+    return 0
+  }
+
+  IFS=',' read -r -a entries <<< "$specification"
+  for entry in "${entries[@]}"; do
+    [[ "$entry" =~ ^([A-Za-z0-9_]+)=(-?[0-9]+)$ ]] ||
+      die "Invalid expected table count delta: $entry"
+    configured_table="${BASH_REMATCH[1]}"
+    configured_delta="${BASH_REMATCH[2]}"
+    if [[ "$configured_table" == "$table_name" ]]; then
+      [[ -z "$matched_delta" ]] ||
+        die "Duplicate expected table count delta for $table_name"
+      matched_delta="$configured_delta"
+    fi
+  done
+
+  printf '%s' "${matched_delta:-0}"
+}
+
 compare_table_counts() {
   local snapshot_dir="$1"
   local database_name="$2"
-  local table_name expected_count actual_count
+  local table_name expected_count actual_count expected_delta adjusted_count
   while IFS=$'\t' read -r table_name expected_count; do
     [[ "$table_name" =~ ^[A-Za-z0-9_]+$ ]] ||
       die "Invalid table name in snapshot: $table_name"
     [[ "$expected_count" =~ ^[0-9]+$ ]] ||
       die "Invalid table count for $table_name"
+    expected_delta="$(expected_table_count_delta "$table_name")"
+    adjusted_count="$((expected_count + expected_delta))"
+    [[ "$adjusted_count" -ge 0 ]] ||
+      die "Expected table count for $table_name cannot be negative"
     actual_count="$(database_count "$database_name" "$table_name")"
-    [[ "$actual_count" == "$expected_count" ]] ||
-      die "Table count mismatch for $table_name: expected $expected_count, got $actual_count"
+    [[ "$actual_count" == "$adjusted_count" ]] ||
+      die "Table count mismatch for $table_name: expected $adjusted_count (snapshot $expected_count + migration delta $expected_delta), got $actual_count"
   done < "$snapshot_dir/table-counts.tsv"
 }
 
@@ -168,7 +222,16 @@ compare_upload_count() {
   local uploads_dir="$2"
   local expected_count actual_count
   expected_count="$(expected_upload_count "$snapshot_dir")"
-  actual_count="$(find "$uploads_dir" -type f | wc -l | tr -d ' ')"
+  actual_count="$(
+    find "$uploads_dir" \
+      \( \
+        -path "$uploads_dir/.ierp-upload-chunks" -o \
+        -path "$uploads_dir/.ierp-thumbnails" \
+      \) -prune -o \
+      -type f -print |
+      wc -l |
+      tr -d ' '
+  )"
   [[ "$actual_count" == "$expected_count" ]] ||
     die "Upload count mismatch: expected $expected_count, got $actual_count"
 }

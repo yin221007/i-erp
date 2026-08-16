@@ -9,6 +9,7 @@ class FakeAuthPool {
     this.users = new Map(users.map(user => [user.id, structuredClone(user)]));
     this.sessions = new Map();
     this.heartbeatUpdates = 0;
+    this.sessionTouchUpdates = 0;
   }
 
   async query(sql, parameters = []) {
@@ -65,6 +66,7 @@ class FakeAuthPool {
       const user = this.users.get(session.userId);
       return [[{
         session_id: session.id,
+        last_seen_at: session.lastSeenAt,
         expires_at: session.expiresAt,
         absolute_expires_at: session.absoluteExpiresAt,
         json_data: JSON.stringify(user)
@@ -76,6 +78,7 @@ class FakeAuthPool {
       const session = this.sessions.get(id);
       session.lastSeenAt = lastSeenAt;
       session.expiresAt = expiresAt;
+      this.sessionTouchUpdates += 1;
       return [{ affectedRows: 1 }, []];
     }
 
@@ -227,6 +230,24 @@ test('multiple device sessions remain independent when one logs out', async () =
 
   await request(app).get('/auth/me').set('Cookie', firstCookie).expect(401);
   await request(app).get('/auth/me').set('Cookie', secondCookie).expect(200);
+});
+
+test('authenticated requests throttle sliding-session database writes', async () => {
+  const { app, pool } = await createAuthTestApp();
+  const login = await request(app)
+    .post('/auth/login')
+    .send({ username: 'member', password: 'member-password' })
+    .expect(200);
+  const cookie = sessionCookie(login);
+
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  assert.equal(pool.sessionTouchUpdates, 0);
+
+  const session = [...pool.sessions.values()][0];
+  session.lastSeenAt = new Date(Date.now() - 3 * 60 * 1000);
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  assert.equal(pool.sessionTouchUpdates, 1);
 });
 
 test('login failures are rate limited by username and client address', async () => {

@@ -148,13 +148,15 @@ const ProjectSummary: React.FC<ProjectSummaryProps> = ({ project, nodes, archive
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <RechartsTooltip />
+                  <RechartsTooltip
+                    formatter={(value: number) => [`${value} 个节点`, '节点数量']}
+                  />
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                     <p className="text-2xl font-black text-slate-800 dark:text-white group-hover:scale-110 transition-transform leading-none">{progress}%</p>
-                    <p className="text-[8px] font-black text-slate-400 uppercase mt-1">Total</p>
+                    <p className="text-[8px] font-black text-slate-400 mt-1">总进度</p>
                 </div>
               </div>
             </div>

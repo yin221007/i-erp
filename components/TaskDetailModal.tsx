@@ -8,9 +8,16 @@ interface TaskDetailModalProps {
   node: WorkflowNode;
   isOpen: boolean;
   onClose: () => void;
-  onUpdate: (updatedNode: WorkflowNode) => void;
-  onAddArchive: (archive: ArchiveItem) => void;
-  onDeleteArchive: (archiveId: string) => void; 
+  onUpdate: (updatedNode: WorkflowNode) => boolean | Promise<boolean>;
+  onAddArchive: (archive: ArchiveItem) => boolean | Promise<boolean>;
+  onDeleteArchive: (
+    archiveId: string,
+    context?: {
+      projectId: string;
+      nodeId: string;
+      attachment: Attachment;
+    }
+  ) => void;
   projectName: string;
   projectId: string; 
   currentUser: User;
@@ -110,10 +117,8 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ node, isOpen, onClose
             category: uploadCategory
           };
           
-          // 更新节点附件（用于局部显示）
-          onUpdate({ ...node, attachments: [...node.attachments, newAttachment] });
-
-          // 同步至全局档案库（核心同步点，确保数据共享）
+          // 先确认正式档案保存成功，再把附件写入流程节点，避免产生只有节点附件、
+          // 没有工程档案的孤立记录。
           const newArchive: ArchiveItem = {
               id: newAttachment.id, 
               title: file.name.split('.')[0], 
@@ -126,10 +131,19 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ node, isOpen, onClose
               uploader: currentUser.nickname,
               url: fileUrl
           };
-          onAddArchive(newArchive);
+          const archiveSaved = await onAddArchive(newArchive);
+          if (!archiveSaved) throw new Error('档案保存失败');
+
+          const projectSaved = await onUpdate({
+            ...node,
+            attachments: [...node.attachments, newAttachment]
+          });
+          if (!projectSaved) {
+            throw new Error('档案已保存，但流程节点同步失败，请刷新后重试');
+          }
 
       } catch (error) {
-          alert("文件上传失败，请重试");
+          alert(error instanceof Error ? error.message : '文件上传失败，请重试');
       } finally {
           setUploadingCount(prev => Math.max(0, prev - 1));
           if (e.target) e.target.value = '';
@@ -139,10 +153,14 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ node, isOpen, onClose
 
   const handleDeleteFile = (fileId: string) => {
       if (isUploading) return;
-      if (window.confirm("确定要删除此附件吗？档案库中也将同步移除。")) {
-        // 调用全局删除逻辑，App.tsx 中的 handleDeleteArchive 会处理项目节点的同步更新
-        onDeleteArchive(fileId); 
-      }
+      const attachment = node.attachments.find(item => item.id === fileId);
+      if (!attachment) return;
+      // 全局删除逻辑统一负责确认、保护期、档案和节点引用同步，避免重复确认。
+      onDeleteArchive(fileId, {
+        projectId,
+        nodeId: node.id,
+        attachment
+      });
   };
 
   const assignedUser = users?.find(u => u.nickname === node.assignee);
@@ -296,7 +314,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ node, isOpen, onClose
                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                                {[
                                    { id: TaskStatus.PENDING, label: '待处理', icon: Clock, color: 'bg-slate-100 text-slate-500 border-slate-200', active: 'bg-slate-600 text-white border-slate-600' },
-                                   { id: TaskStatus.IN_PROGRESS, label: '执行中', icon: RefreshCw, color: 'bg-blue-50 text-blue-500 border-blue-100', active: 'bg-primary-600 text-white border-primary-600' },
+                                   { id: TaskStatus.IN_PROGRESS, label: '执行中', icon: RefreshCw, color: 'bg-blue-50 text-blue-600 border-blue-100', active: 'bg-blue-600 text-white border-blue-600' },
                                    { id: TaskStatus.COMPLETED, label: '已完结', icon: CheckCircle, color: 'bg-emerald-50 text-emerald-700 border-emerald-100', active: 'bg-emerald-600 text-white border-emerald-600' },
                                    { id: TaskStatus.BLOCKED, label: '存在风险', icon: AlertTriangle, color: 'bg-red-50 text-red-500 border-red-100', active: 'bg-red-600 text-white border-red-600' }
                                ].map((s) => (

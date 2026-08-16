@@ -4,6 +4,8 @@ import { PaymentRecord, Project, User, Client, ArchiveItem } from '../types';
 import { Search, Plus, Edit2, Trash2, Save, X, Calculator, AlertTriangle, ShieldCheck, Download, Upload, JapaneseYen, Wallet, FileCheck } from 'lucide-react';
 import { getInvoiceArchives as findInvoiceArchives, resolvePaymentProject } from '../lib/payment-archives.js';
 
+const PdfPreview = React.lazy(() => import('./PdfPreview'));
+
 interface PaymentDashboardProps {
   payments: PaymentRecord[];
   projects: Project[];
@@ -719,9 +721,9 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
                 <button onClick={() => setInvoicePreviewItem(null)} className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
               </div>
             </div>
-            <div className="flex-1 bg-slate-100 p-5 dark:bg-slate-950">
+            <div className="min-h-0 flex-1 bg-slate-100 p-2 dark:bg-slate-950 sm:p-5">
               {invoicePreviewItem.url && invoicePreviewItem.fileType === 'PDF' ? (
-                <iframe src={invoicePreviewItem.url} title="Invoice Preview" className="h-full w-full rounded-2xl border-0 bg-white shadow-xl" />
+                <React.Suspense fallback={<div className="flex h-full items-center justify-center text-sm font-black text-slate-500">正在启动 PDF 查看器…</div>}><PdfPreview src={invoicePreviewItem.url} title={invoicePreviewItem.title} /></React.Suspense>
               ) : invoicePreviewItem.url && ['JPG', 'JPEG', 'PNG', 'GIF'].includes(invoicePreviewItem.fileType) ? (
                 <img src={invoicePreviewItem.url} alt={invoicePreviewItem.title} className="mx-auto h-full max-w-full rounded-2xl object-contain shadow-xl" />
               ) : (

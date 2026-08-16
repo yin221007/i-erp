@@ -98,14 +98,30 @@ test('project resources are scoped by ownership, department management, and exec
   );
 });
 
-test('project-linked money and production writes require the proper department and visible project', () => {
+test('project-linked money and production writes require the proper department or assigned project manager', () => {
   const context = {
-    projects: [{ id: 'p-1', manager: 'Alice' }],
-    users: [{ nickname: 'Alice', department: '销售部' }]
+    projects: [
+      { id: 'p-1', manager: 'Alice' },
+      { id: 'p-other', manager: 'Bob' }
+    ],
+    users: [
+      { nickname: 'Alice', department: '销售部' },
+      { nickname: 'Bob', department: '销售部' }
+    ]
   };
 
   assert.equal(canWriteResource('payments', normalUser, { projectId: 'p-1' }, context), true);
-  assert.equal(canWriteResource('production', normalUser, { projectId: 'p-1' }, context), false);
+  assert.equal(canWriteResource('production', normalUser, { projectId: 'p-1' }, context), true);
+  assert.equal(canWriteResource('production', normalUser, { projectId: 'p-other' }, context), false);
+  assert.equal(
+    canWriteResource(
+      'production',
+      normalUser,
+      { projectId: 'missing', manager: 'Alice' },
+      context
+    ),
+    false
+  );
   assert.equal(
     canWriteResource(
       'production',
@@ -114,6 +130,15 @@ test('project-linked money and production writes require the proper department a
       context
     ),
     true
+  );
+  assert.equal(
+    canWriteResource(
+      'production',
+      { ...normalUser, department: '财务部' },
+      { projectId: 'p-other' },
+      context
+    ),
+    false
   );
   assert.equal(canWriteResource('payments', normalUser, { projectId: 'p-hidden' }, context), false);
 });
@@ -271,6 +296,11 @@ test('approval updates allow only valid applicant edits or current approver outc
     ...approved,
     currentContent: '审批时偷偷改内容'
   };
+  const forgedExecution = {
+    ...approved,
+    actionExecutionStatus: 'Completed',
+    actionExecutedAt: '2026-01-01T01:00:00.000Z'
+  };
   const returnedPrevious = {
     ...previous,
     status: 'Returned',
@@ -295,4 +325,5 @@ test('approval updates allow only valid applicant edits or current approver outc
   assert.equal(canUpdateResource('approvals', normalUser, applicantRename, returnedPrevious), false);
   assert.equal(canUpdateResource('approvals', approver, approved, previous), true);
   assert.equal(canUpdateResource('approvals', approver, tamperedContent, previous), false);
+  assert.equal(canUpdateResource('approvals', approver, forgedExecution, previous), false);
 });

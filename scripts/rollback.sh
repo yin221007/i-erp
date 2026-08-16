@@ -4,8 +4,11 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/deploy-lib.sh"
 
+GREEN_PRODUCTION_PROJECT="${GREEN_PRODUCTION_PROJECT:-deploy}"
 GREEN_FRONTEND_CONTAINER="${GREEN_FRONTEND_CONTAINER:-ierp-green-frontend}"
 GREEN_BACKEND_CONTAINER="${GREEN_BACKEND_CONTAINER:-ierp-green-backend}"
+GREEN_NETWORK_NAME="${GREEN_NETWORK_NAME:-ierp-green-net}"
+GREEN_FRONTEND_PORT="${GREEN_FRONTEND_PORT:-10667}"
 
 # STEP 1: verify_snapshot
 # STEP 2: stop_green_stack
@@ -62,7 +65,17 @@ restore_uploads() {
 
 start_old_stack() {
   log "Starting preserved old stack"
-  docker compose --env-file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" up -d
+  GREEN_DB_NAME="$DB_NAME" \
+  GREEN_UPLOADS_PATH="$UPLOADS_PATH" \
+  GREEN_MAINTENANCE_QUEUE_PATH="$MAINTENANCE_QUEUE_PATH" \
+  GREEN_BACKEND_CONTAINER="$GREEN_BACKEND_CONTAINER" \
+  GREEN_FRONTEND_CONTAINER="$GREEN_FRONTEND_CONTAINER" \
+  GREEN_NETWORK_NAME="$GREEN_NETWORK_NAME" \
+  GREEN_FRONTEND_PORT="$GREEN_FRONTEND_PORT" \
+  BACKUP_PATH="$BACKUP_ROOT" \
+    compose_with_clean_env_file \
+      "$OLD_ENV_FILE" -p "$GREEN_PRODUCTION_PROJECT" \
+      -f "$OLD_COMPOSE_FILE" up -d
   if [[ -n "${OLD_HEALTH_URL:-}" ]]; then
     wait_for_health "$OLD_HEALTH_URL" 30
   fi
@@ -71,7 +84,7 @@ start_old_stack() {
 main() {
   require_env \
     IERP_VERSION ROLLBACK_SNAPSHOT DB_HOST DB_USER DB_PASSWORD DB_NAME \
-    UPLOADS_PATH OLD_COMPOSE_FILE OLD_ENV_FILE BACKUP_ROOT
+    UPLOADS_PATH MAINTENANCE_QUEUE_PATH OLD_COMPOSE_FILE OLD_ENV_FILE BACKUP_ROOT
   [[ -f "$OLD_COMPOSE_FILE" ]] || die "Old Compose file does not exist"
   [[ -f "$OLD_ENV_FILE" ]] || die "Old environment file does not exist"
   verify_snapshot "$ROLLBACK_SNAPSHOT"
@@ -88,7 +101,8 @@ main() {
     "This will replace the production database and uploads with the named snapshot."
 
   stop_green_stack
-  docker compose --env-file "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" stop >/dev/null 2>&1 || true
+  compose_with_clean_env_file \
+    "$OLD_ENV_FILE" -f "$OLD_COMPOSE_FILE" stop >/dev/null 2>&1 || true
 
   quarantine_root="$BACKUP_ROOT/failed-rollbacks/$(date -u +%Y%m%dT%H%M%SZ)"
   quarantine_failed_database "$quarantine_root"

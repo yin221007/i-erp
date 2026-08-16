@@ -94,6 +94,8 @@ MYSQL_PWD="$DB_PASSWORD" mariadb-dump \
 tar \
   --create \
   --gzip \
+  --exclude='./.ierp-upload-chunks' \
+  --exclude='./.ierp-thumbnails' \
   --file="$incomplete_directory/uploads.tar.gz" \
   --directory="$UPLOADS_ROOT" \
   .
@@ -146,7 +148,16 @@ if [[ -n "${DEPLOY_ROOT:-}" && -d "$DEPLOY_ROOT" ]]; then
   fi
 fi
 
-upload_file_count="$(find "$UPLOADS_ROOT" -type f | wc -l | tr -d ' ')"
+upload_file_count="$(
+  find "$UPLOADS_ROOT" \
+    \( \
+      -path "$UPLOADS_ROOT/.ierp-upload-chunks" -o \
+      -path "$UPLOADS_ROOT/.ierp-thumbnails" \
+    \) -prune -o \
+    -type f -print |
+    wc -l |
+    tr -d ' '
+)"
 generation_size_bytes="$(
   du -sk "$incomplete_directory" |
     awk '{ print $1 * 1024 }'

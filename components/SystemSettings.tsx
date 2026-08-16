@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { AppSettings, BackupSnapshot, MaintenanceJob } from '../types';
 import { X, Save, Image as ImageIcon, Sparkles, Database, ShieldCheck, Link as LinkIcon, KeyRound, CheckCircle2, Loader2, Trash2, RefreshCw, Archive, RotateCcw, AlertTriangle } from 'lucide-react';
 import { API_URL, apiFetch, apiJson } from '../lib/api';
+import { APP_VERSION } from '../lib/version';
 
 interface SystemSettingsProps {
   isOpen: boolean;
@@ -355,7 +356,12 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ isOpen, onClose, settin
         <div className="flex justify-between items-center mb-8 border-b border-slate-100 dark:border-slate-700 pb-5 shrink-0">
           <div className="flex items-center gap-3">
              <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-xl"><Sparkles className="w-6 h-6 text-primary-600" /></div>
-             <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">ERP 全局控制中心</h3>
+	             <div>
+	               <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">ERP 全局控制中心</h3>
+	               <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+	                 当前版本 v{APP_VERSION}
+	               </p>
+	             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"><X className="w-6 h-6 text-slate-500" /></button>
         </div>

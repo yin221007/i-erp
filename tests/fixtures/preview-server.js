@@ -1,4 +1,6 @@
 import express from 'express';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 
 const PORT = 3000;
 const HOST = '127.0.0.1';
@@ -73,6 +75,37 @@ const previewProject = {
   currentPhaseDeadline: '2026-08-15',
   createdAt: '2026-06-01T00:00:00.000Z'
 };
+
+const previewInvoiceAttachments = [
+  {
+    id: 'invoice-legacy-node-only',
+    name: '历史节点发票.png',
+    url: '/api/preview-media/invoice-legacy-node-only-2563eb.png',
+    uploadDate: '2026-07-24T08:30:00.000Z',
+    type: 'image/png',
+    size: '1.2 MB',
+    category: 'Invoice'
+  },
+  {
+    id: 'invoice-formal-1',
+    name: '设备采购发票一.png',
+    url: '/api/preview-media/invoice-formal-1-0f766e.png',
+    uploadDate: '2026-07-25T08:30:00.000Z',
+    type: 'image/png',
+    size: '1.4 MB',
+    category: 'Invoice'
+  },
+  {
+    id: 'invoice-formal-2',
+    name: '设备采购发票二.png',
+    url: '/api/preview-media/invoice-formal-2-7c3aed.png',
+    uploadDate: '2026-07-26T08:30:00.000Z',
+    type: 'image/png',
+    size: '1.6 MB',
+    category: 'Invoice'
+  }
+];
+previewProject.nodes.at(-1).attachments = previewInvoiceAttachments;
 
 const createMedia = ({
   id,
@@ -164,7 +197,33 @@ const archives = [
     nodeId: 'node-1-1',
     nodeTitle: '现场测量与点位复核',
     color: 'b45309'
-  })
+  }),
+  ...previewInvoiceAttachments.slice(1).map(attachment => ({
+    id: attachment.id,
+    title: attachment.name.replace(/\.[^.]+$/, ''),
+    category: 'Invoice',
+    projectId: previewProject.id,
+    projectName: previewProject.name,
+    fileType: 'PNG',
+    size: attachment.size,
+    uploadDate: attachment.uploadDate,
+    uploader: previewUser.nickname,
+    url: attachment.url,
+    createdAt: attachment.uploadDate
+  })),
+  {
+    id: 'mobile-pdf-preview',
+    title: '手机 PDF 预览验证',
+    category: 'SignOff',
+    projectId: previewProject.id,
+    projectName: previewProject.name,
+    fileType: 'PDF',
+    size: '3.3 MB',
+    uploadDate: '2026-08-11T10:00:00.000Z',
+    uploader: previewUser.nickname,
+    url: '/api/preview-media/mobile-preview.pdf',
+    createdAt: '2026-08-11T10:00:00.000Z'
+  }
 ];
 
 const resources = {
@@ -173,7 +232,7 @@ const resources = {
   archives,
   settings: [{
     id: 'global_config',
-    appName: 'i ERP 1.12.1 预览',
+    appName: 'i ERP 1.12.2 预览',
     logoUrl: '',
     logoWidth: 120,
     poweredByText: 'Local Preview'
@@ -183,7 +242,24 @@ const resources = {
   schedule: [],
   docs: [],
   production: [],
-  payments: [],
+  payments: [{
+    id: 'preview-payment',
+    projectId: previewProject.id,
+    projectName: previewProject.name,
+    managerName: previewUser.nickname,
+    clientContactName: '预览客户',
+    contractAmount: 100000,
+    variationAmount: 0,
+    submissionAmount: 100000,
+    auditedAmount: 100000,
+    paymentTerms: '预览环境发票关联回归',
+    receivedAmount: 50000,
+    finalPaymentDueDate: '2026-09-30',
+    invoicedAmount: 100000,
+    warrantyPeriod: '2年',
+    creatorId: previewUser.id,
+    createdAt: '2026-07-26T08:30:00.000Z'
+  }],
   approvals: [],
   worklogs: [],
   messages: [],
@@ -210,14 +286,31 @@ app.post('/auth/logout', (_req, res) => res.json({ success: true }));
 app.get('/branding/logo', (_req, res) => res.status(404).json({ error: 'Logo not configured' }));
 app.get('/upload/config', (_req, res) => res.json({
   maxFileSize: 100 * 1024 * 1024,
+  videoChunkSize: 4 * 1024 * 1024,
+  uploadConcurrency: 2,
   mediaExtensions: {
     image: ['png', 'jpg', 'jpeg', 'gif', 'webp'],
     video: ['mp4', 'mov', 'webm']
   }
 }));
+app.get('/ai/settings', (_req, res) => res.json({
+  providers: {
+    deepseek: { configured: false, baseUrl: '', model: '' },
+    minimax: { configured: false, baseUrl: '', model: '' }
+  }
+}));
 
 app.get('/preview-media/sample.mp4', (_req, res) => {
   res.status(204).type('video/mp4').end();
+});
+
+app.get('/preview-media/mobile-preview.pdf', (_req, res) => {
+  const previewPdfPath = process.env.PREVIEW_PDF_PATH;
+  if (!previewPdfPath || !existsSync(previewPdfPath)) {
+    return res.status(404).json({ error: 'Set PREVIEW_PDF_PATH to a local PDF file' });
+  }
+  res.set('Content-Disposition', 'inline; filename="mobile-preview.pdf"');
+  return res.sendFile(path.resolve(previewPdfPath));
 });
 
 app.get('/preview-media/:name.png', (req, res) => {
@@ -235,7 +328,7 @@ app.get('/preview-media/:name.png', (req, res) => {
       <path d="M0 650 L260 420 L430 560 L700 260 L1200 710 L1200 900 L0 900 Z" fill="#fff" opacity=".14"/>
       <circle cx="920" cy="210" r="90" fill="#fff" opacity=".16"/>
       <text x="70" y="760" fill="#fff" font-size="46" font-family="sans-serif" font-weight="700">${label}</text>
-      <text x="70" y="820" fill="#cbd5e1" font-size="26" font-family="sans-serif">i ERP 1.12.1 · 本地预览素材</text>
+      <text x="70" y="820" fill="#cbd5e1" font-size="26" font-family="sans-serif">i ERP 1.12.2 · 本地预览素材</text>
     </svg>
   `);
 });
@@ -244,6 +337,14 @@ app.get('/:resource', (req, res) => {
   const records = resources[req.params.resource];
   if (!records) return res.status(404).json({ error: 'Resource not found' });
   return res.json(records);
+});
+
+app.post('/archives/batch', (req, res) => {
+  if (!Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Archive batch must be an array' });
+  }
+  archives.push(...structuredClone(req.body));
+  return res.status(201).json(req.body);
 });
 
 app.post('/:resource', (req, res) => {

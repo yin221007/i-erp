@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   formatProjectMediaSize,
   getFileExtension,
+  getProjectMediaThumbnailUrl,
   getProjectMediaType,
   groupProjectMediaAlbums,
   projectMediaTitle,
@@ -23,6 +24,25 @@ test('project media helpers format names and sizes for upload records', () => {
   assert.equal(formatProjectMediaSize(0), '0 B');
   assert.equal(formatProjectMediaSize(1024), '1.0 KB');
   assert.equal(formatProjectMediaSize(3 * 1024 * 1024), '3.0 MB');
+});
+
+test('project media thumbnails use protected fixed-width URLs only', () => {
+  assert.equal(
+    getProjectMediaThumbnailUrl('/api/uploads/1769674116177-400514667.jpg'),
+    '/api/uploads/1769674116177-400514667.jpg/thumbnail?width=640'
+  );
+  assert.equal(
+    getProjectMediaThumbnailUrl('/api/uploads/1769674116177-400514667.jpg', 320),
+    '/api/uploads/1769674116177-400514667.jpg/thumbnail?width=320'
+  );
+  assert.equal(
+    getProjectMediaThumbnailUrl('https://example.test/photo.jpg'),
+    'https://example.test/photo.jpg'
+  );
+  assert.equal(
+    getProjectMediaThumbnailUrl('/api/uploads/photo.jpg', 123),
+    '/api/uploads/photo.jpg'
+  );
 });
 
 test('project media records sort by captured date and then upload time descending', () => {

@@ -16,8 +16,8 @@ interface ApprovalManagerProps {
   approvals: Approval[];
   users: User[];
   currentUser: User;
-  onAddApproval: (approval: Approval) => void;
-  onUpdateApproval: (approval: Approval) => void;
+  onAddApproval: (approval: Approval) => Promise<boolean>;
+  onUpdateApproval: (approval: Approval) => Promise<boolean>;
   onDeleteApproval: (id: string) => void;
 }
 
@@ -53,6 +53,7 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
   const [selectedApproverIds, setSelectedApproverIds] = useState<string[]>([]);
   const [formAttachments, setFormAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [auditComment, setAuditComment] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -145,28 +146,35 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
     setAuditComment(''); setIsModalOpen(true);
   };
 
-  const handleSave = (asDraft: boolean) => {
+  const handleSave = async (asDraft: boolean) => {
     if (!formTitle || selectedApproverIds.length === 0) return alert("标题及审批人必填");
     const now = new Date().toISOString();
     const data: Partial<Approval> = { title: formTitle, type: formType, currentContent: formContent, currentAttachments: formAttachments, strategy: formStrategy, approverIds: selectedApproverIds, approverNamesDisplay: users.filter(u => selectedApproverIds.includes(u.id)).map(u=>u.nickname).join(', '), status: asDraft ? 'Draft' : 'Pending', updatedAt: now };
+    setIsSaving(true);
+    let saved = false;
     if (editingApproval) {
       const shouldCreateFreshVersion = !asDraft && (editingApproval.status === 'Returned' || editingApproval.status === 'Draft');
       const nextVersionNo = Math.max(0, ...(editingApproval.versions || []).map(v => v.version || 0)) + 1;
       const versions = shouldCreateFreshVersion
         ? [{ version: nextVersionNo, content: formContent, attachments: formAttachments, submittedAt: now, outcomes: [] }, ...(editingApproval.versions || [])]
         : editingApproval.versions;
-      onUpdateApproval({ ...editingApproval, ...data, versions } as Approval);
+      saved = await onUpdateApproval({ ...editingApproval, ...data, versions } as Approval);
     }
-    else onAddApproval({ ...data, id: Math.random().toString(36).substr(2, 9), applicantId: currentUser.id, applicantName: currentUser.nickname, department: currentUser.department, versions: [{ version: 1, content: formContent, attachments: formAttachments, submittedAt: now, outcomes: [] }], createdAt: now } as Approval);
-    setIsModalOpen(false);
+    else saved = await onAddApproval({ ...data, id: Math.random().toString(36).substr(2, 9), applicantId: currentUser.id, applicantName: currentUser.nickname, department: currentUser.department, versions: [{ version: 1, content: formContent, attachments: formAttachments, submittedAt: now, outcomes: [] }], createdAt: now } as Approval);
+    setIsSaving(false);
+    if (saved) setIsModalOpen(false);
   };
 
-  const handleAuditAction = (status: 'Approved' | 'Rejected' | 'Returned') => {
+  const handleAuditAction = async (status: 'Approved' | 'Rejected' | 'Returned') => {
     if (!editingApproval) return;
     if (!auditComment && status !== 'Approved') return alert("请填写签署意见");
     const now = new Date().toISOString();
     const outcome: ApprovalOutcome = { status, approverId: currentUser.id, approverName: currentUser.nickname, comment: auditComment || '同意', date: now };
-    const updatedVer = [...(editingApproval.versions || [])];
+    const updatedVer = (editingApproval.versions || []).map(version => ({
+      ...version,
+      attachments: [...(version.attachments || [])],
+      outcomes: [...(version.outcomes || [])]
+    }));
     if (updatedVer.length === 0) updatedVer.push({ version: 1, content: editingApproval.currentContent, attachments: editingApproval.currentAttachments, submittedAt: editingApproval.createdAt, outcomes: [] });
     updatedVer[0].outcomes = [...updatedVer[0].outcomes, outcome];
     
@@ -178,8 +186,10 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
         if (editingApproval.strategy === 'OR_SIGN') nextStatus = 'Approved';
         else nextStatus = approvedCount === editingApproval.approverIds.length ? 'Approved' : 'Pending';
     }
-    onUpdateApproval({ ...editingApproval, status: nextStatus, updatedAt: now, versions: updatedVer });
-    setIsModalOpen(false);
+    setIsSaving(true);
+    const saved = await onUpdateApproval({ ...editingApproval, status: nextStatus, updatedAt: now, versions: updatedVer });
+    setIsSaving(false);
+    if (saved) setIsModalOpen(false);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -372,9 +382,9 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
                             <h4 className="text-sm font-black text-emerald-800 dark:text-emerald-300 mb-4 uppercase tracking-widest flex items-center gap-2">签署审批意见 <MoreHorizontal className="w-4 h-4" /></h4>
                             <textarea className="w-full border-2 border-emerald-100 dark:border-emerald-800 rounded-2xl p-4 h-32 mb-6 outline-none focus:border-emerald-500 bg-white dark:bg-slate-900 text-sm font-medium transition-all" placeholder="输入决策理由及补充说明..." value={auditComment} onChange={e => setAuditComment(e.target.value)} />
                             <div className="grid grid-cols-2 gap-4">
-                                <button onClick={() => handleAuditAction('Approved')} className="bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg hover:bg-emerald-700 active:scale-95 transition-all text-xs uppercase tracking-widest">签署核准</button>
-                                <button onClick={() => handleAuditAction('Rejected')} className="bg-red-600 text-white py-4 rounded-xl font-black shadow-lg hover:bg-red-700 active:scale-95 transition-all text-xs uppercase tracking-widest">签署驳回</button>
-                                <button onClick={() => handleAuditAction('Returned')} className="col-span-2 border-2 border-orange-200 text-orange-600 py-4 rounded-xl font-black hover:bg-orange-50 active:scale-95 transition-all text-xs uppercase tracking-widest">退回补充资料</button>
+                                <button disabled={isSaving} onClick={() => void handleAuditAction('Approved')} className="bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg hover:bg-emerald-700 disabled:opacity-50 active:scale-95 transition-all text-xs uppercase tracking-widest">签署核准</button>
+                                <button disabled={isSaving} onClick={() => void handleAuditAction('Rejected')} className="bg-red-600 text-white py-4 rounded-xl font-black shadow-lg hover:bg-red-700 disabled:opacity-50 active:scale-95 transition-all text-xs uppercase tracking-widest">签署驳回</button>
+                                <button disabled={isSaving} onClick={() => void handleAuditAction('Returned')} className="col-span-2 border-2 border-orange-200 text-orange-600 py-4 rounded-xl font-black hover:bg-orange-50 disabled:opacity-50 active:scale-95 transition-all text-xs uppercase tracking-widest">退回补充资料</button>
                             </div>
                         </div>
                     )}
@@ -398,8 +408,8 @@ const ApprovalManager: React.FC<ApprovalManagerProps> = ({ approvals, users, cur
                 <div className="fixed lg:absolute bottom-6 left-6 right-6 lg:left-10 lg:right-10 flex flex-col md:flex-row justify-end gap-4 border-t-2 border-slate-50 dark:border-slate-700 pt-6 bg-white dark:bg-slate-800 lg:bg-transparent">
                     {(viewMode === 'create' || viewMode === 'edit') && (
                         <>
-                            <button onClick={() => handleSave(true)} className="px-8 py-4 text-primary-600 font-black uppercase tracking-widest text-[10px] hover:bg-primary-50 rounded-xl transition-all">暂存至草稿箱</button>
-                            <button onClick={() => handleSave(false)} className="px-14 py-4 bg-primary-600 text-white rounded-2xl shadow-2xl shadow-primary-500/30 font-black active:scale-95 uppercase tracking-widest text-[10px] flex items-center gap-3 hover:bg-primary-700"><Send className="w-5 h-5" /> 立即提交并推送</button>
+                            <button disabled={isSaving} onClick={() => void handleSave(true)} className="px-8 py-4 text-primary-600 font-black uppercase tracking-widest text-[10px] hover:bg-primary-50 disabled:opacity-50 rounded-xl transition-all">暂存至草稿箱</button>
+                            <button disabled={isSaving} onClick={() => void handleSave(false)} className="px-14 py-4 bg-primary-600 text-white rounded-2xl shadow-2xl shadow-primary-500/30 font-black active:scale-95 disabled:opacity-50 uppercase tracking-widest text-[10px] flex items-center gap-3 hover:bg-primary-700"><Send className="w-5 h-5" /> {isSaving ? '正在保存' : '立即提交并推送'}</button>
                         </>
                     )}
                     {viewMode === 'view' && (

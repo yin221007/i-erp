@@ -5,8 +5,9 @@ import {
 } from 'node:crypto';
 
 export const SESSION_COOKIE_NAME = 'ierp_session';
-export const SESSION_IDLE_MILLISECONDS = 30 * 24 * 60 * 60 * 1000;
-export const SESSION_ABSOLUTE_MILLISECONDS = 90 * 24 * 60 * 60 * 1000;
+export const SESSION_IDLE_MILLISECONDS = 12 * 60 * 60 * 1000;
+export const SESSION_ABSOLUTE_MILLISECONDS = 30 * 24 * 60 * 60 * 1000;
+export const SESSION_TOUCH_INTERVAL_MILLISECONDS = 2 * 60 * 1000;
 
 export function hashSessionToken(token) {
   return createHash('sha256').update(token).digest('hex');
@@ -67,6 +68,7 @@ export async function findSessionByToken(pool, token, now = new Date()) {
   const [rows] = await pool.query(
     `SELECT
       sessions.id AS session_id,
+      sessions.last_seen_at,
       sessions.expires_at,
       sessions.absolute_expires_at,
       users.json_data
@@ -83,17 +85,28 @@ export async function findSessionByToken(pool, token, now = new Date()) {
 
   const row = rows[0];
   const absoluteExpiresAt = new Date(row.absolute_expires_at);
-  const slidingExpiresAt = new Date(now.getTime() + SESSION_IDLE_MILLISECONDS);
-  const expiresAt = new Date(
-    Math.min(slidingExpiresAt.getTime(), absoluteExpiresAt.getTime())
-  );
+  const storedExpiresAt = new Date(row.expires_at);
+  const lastSeenAt = new Date(row.last_seen_at);
+  const lastSeenTimestamp = lastSeenAt.getTime();
+  const shouldTouchSession =
+    !Number.isFinite(lastSeenTimestamp) ||
+    now.getTime() - lastSeenTimestamp >= SESSION_TOUCH_INTERVAL_MILLISECONDS;
+  let expiresAt = storedExpiresAt;
 
-  await pool.query(
-    `UPDATE auth_sessions
-    SET last_seen_at = ?, expires_at = ?
-    WHERE id = ?`,
-    [now, expiresAt, row.session_id]
-  );
+  if (shouldTouchSession) {
+    const slidingExpiresAt = new Date(
+      now.getTime() + SESSION_IDLE_MILLISECONDS
+    );
+    expiresAt = new Date(
+      Math.min(slidingExpiresAt.getTime(), absoluteExpiresAt.getTime())
+    );
+    await pool.query(
+      `UPDATE auth_sessions
+      SET last_seen_at = ?, expires_at = ?
+      WHERE id = ?`,
+      [now, expiresAt, row.session_id]
+    );
+  }
 
   return {
     id: row.session_id,
