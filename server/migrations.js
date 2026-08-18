@@ -2,6 +2,7 @@ import {
   hashPassword,
   isPasswordHash
 } from './auth/passwords.js';
+import { getBeijingYearMonth } from './services/project-identifiers.js';
 
 function parseJson(value, context) {
   if (value && typeof value === 'object') return structuredClone(value);
@@ -143,6 +144,44 @@ async function createMaintenanceJobsTable(connection) {
       KEY idx_maintenance_jobs_status (status, updated_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+}
+
+async function createProjectContractSequences(connection) {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS project_contract_sequences (
+      contract_year SMALLINT UNSIGNED NOT NULL,
+      last_number INT UNSIGNED NOT NULL DEFAULT 0,
+      updated_at DATETIME(3) NOT NULL,
+      PRIMARY KEY (contract_year)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const [rows] = await connection.query(
+    'SELECT id, json_data FROM projects ORDER BY id'
+  );
+  const countsByYear = new Map();
+  for (const row of rows) {
+    const project = parseJson(row.json_data, `projects/${row.id}`);
+    if (!project.createdAt) continue;
+    try {
+      const { year } = getBeijingYearMonth(project.createdAt);
+      countsByYear.set(year, (countsByYear.get(year) || 0) + 1);
+    } catch {
+      // 历史记录日期异常时只跳过序号初始化，不改写或阻断原工程数据。
+    }
+  }
+
+  for (const [year, count] of countsByYear) {
+    await connection.query(
+      `INSERT INTO project_contract_sequences
+        (contract_year, last_number, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP(3))
+      ON DUPLICATE KEY UPDATE
+        last_number = GREATEST(last_number, VALUES(last_number)),
+        updated_at = CURRENT_TIMESTAMP(3)`,
+      [year, count]
+    );
+  }
 }
 
 async function seedMiniMaxModel(connection) {
@@ -491,6 +530,11 @@ const MIGRATIONS = Object.freeze([
     version: '012_restore_auto_deleted_approval_history',
     transactional: true,
     up: restoreAutoDeletedApprovalHistory
+  },
+  {
+    version: '013_create_project_contract_sequences',
+    transactional: false,
+    up: createProjectContractSequences
   }
 ]);
 

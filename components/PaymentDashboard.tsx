@@ -654,7 +654,7 @@ const PaymentDashboard: React.FC<PaymentDashboardProps> = ({
                   <div className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
                     <h4 className="text-sm font-black text-slate-900 dark:text-white">工程关联</h4>
                     <div className="mt-4 space-y-2 text-xs font-bold text-slate-500">
-                      <p>工程 ID：{selectedPayment.projectId || project?.id || '未关联'}</p>
+                      <p>工程编号：{project?.code || '未找到关联工程'}</p>
                       <p>工程名称：{project?.name || selectedPayment.projectName}</p>
                       <p>客户单位：{project?.clientName || '-'}</p>
                     </div>

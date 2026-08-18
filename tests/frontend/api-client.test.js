@@ -413,3 +413,25 @@ test('system settings derives and displays the package version', async () => {
   assert.match(settingsSource, /当前版本 v\{APP_VERSION\}/);
   assert.match(versionSource, /packageMetadata\.version/);
 });
+
+test('project creation uses server identities and displays the business project code', async () => {
+  const [appSource, projectListSource, paymentSource] = await Promise.all([
+    readFile(appUrl, 'utf8'),
+    readFile(projectListUrl, 'utf8'),
+    readFile(paymentDashboardUrl, 'utf8')
+  ]);
+  const createStart = appSource.indexOf('const handleAddProject');
+  const createEnd = appSource.indexOf('const handleDeleteProject', createStart);
+  const createSource = appSource.slice(createStart, createEnd);
+
+  assert.doesNotMatch(createSource, /Math\.random/);
+  assert.doesNotMatch(createSource, /PJ-/);
+  assert.match(createSource, /const savedProject = await response\.json\(\) as Project/);
+  assert.match(createSource, /setProjects\(prev => \[\.\.\.prev, savedProject\]\)/);
+  assert.match(projectListSource, /await onAddProject\(payload\)/);
+  assert.match(projectListSource, /留空自动生成，如 2026-08-017/);
+  assert.match(projectListSource, /disabled=\{Boolean\(editingProject\)\}/);
+  assert.match(projectListSource, /工程编号建档后不可修改/);
+  assert.match(paymentSource, /工程编号：\{project\?\.code/);
+  assert.doesNotMatch(paymentSource, /工程 ID：/);
+});
