@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
+import { simpleParser } from 'mailparser';
 import {
   createEmailRouter,
   sanitizeEmailHtml
@@ -96,4 +97,21 @@ test('message HTML is sanitized before it reaches the browser', async () => {
 
   assert.equal(response.body.html, sanitizeEmailHtml(maliciousHtml));
   assert.doesNotMatch(response.body.html, /script|onclick|onerror|tracker/i);
+});
+
+test('secured mail parser dependency still converts HTML messages', async () => {
+  const source = [
+    'From: sender@example.com',
+    'To: receiver@example.com',
+    'Subject: HTML compatibility',
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    '<p>工程邮件 <strong>解析正常</strong></p>'
+  ].join('\r\n');
+
+  const parsed = await simpleParser(source);
+
+  assert.match(parsed.text, /工程邮件\s+解析正常/);
+  assert.match(parsed.html, /<strong>解析正常<\/strong>/);
 });
