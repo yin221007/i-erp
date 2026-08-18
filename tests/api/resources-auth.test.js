@@ -14,6 +14,7 @@ class FakeResourcePool {
       ])
     );
     this.sessions = new Map();
+    this.projectSequences = new Map();
   }
 
   async query(sql, parameters = []) {
@@ -71,6 +72,31 @@ class FakeResourcePool {
       return [[...this.users.values()].map(user => ({
         json_data: JSON.stringify(user)
       })), []];
+    }
+
+    if (normalized.startsWith('INSERT IGNORE INTO project_contract_sequences')) {
+      const [year] = parameters;
+      if (!this.projectSequences.has(year)) this.projectSequences.set(year, 0);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized.startsWith('SELECT last_number FROM project_contract_sequences')) {
+      const [year] = parameters;
+      return [[{ last_number: this.projectSequences.get(year) }], []];
+    }
+
+    if (normalized === 'SELECT id, json_data FROM projects ORDER BY id FOR UPDATE') {
+      const projects = this.resources.get('projects') || new Map();
+      return [[...projects].map(([id, data]) => ({
+        id,
+        json_data: JSON.stringify(data)
+      })), []];
+    }
+
+    if (normalized.startsWith('UPDATE project_contract_sequences SET last_number')) {
+      const [lastNumber, year] = parameters;
+      this.projectSequences.set(year, lastNumber);
+      return [{ affectedRows: 1 }, []];
     }
 
     const recordByIdMatch = normalized.match(
@@ -351,6 +377,107 @@ test('create rejects an existing id instead of replacing a hidden record', async
     .expect(409);
 
   assert.equal(pool.resources.get('payments').get('pay-hidden').projectId, 'p-hidden');
+});
+
+test('project creation assigns server UUID and a company annual contract code', async () => {
+  const { app, pool } = await createResourceTestApp();
+  const cookie = await login(app);
+  const response = await request(app)
+    .post('/projects')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      id: 'client-forged-id',
+      code: 'PJ-CLIENT-FORGED',
+      name: '服务器编号工程',
+      clientName: '测试建设单位',
+      manager: 'alice',
+      internalContractNo: '',
+      nodes: []
+    })
+    .expect(201);
+
+  assert.match(
+    response.body.id,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  );
+  assert.match(response.body.code, /^\d{4}-\d{2}-001$/);
+  assert.equal(response.body.internalContractNo, response.body.code);
+  assert.notEqual(response.body.id, 'client-forged-id');
+  assert.notEqual(response.body.code, 'PJ-CLIENT-FORGED');
+  assert.deepEqual(
+    pool.resources.get('projects').get(response.body.id),
+    response.body
+  );
+});
+
+test('manual project codes take priority and duplicate codes are rejected', async () => {
+  const { app } = await createResourceTestApp();
+  const cookie = await login(app);
+  const first = await request(app)
+    .post('/projects')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      name: '人工编号工程',
+      clientName: '测试建设单位',
+      manager: 'alice',
+      internalContractNo: ' IN-2026-088 ',
+      nodes: []
+    })
+    .expect(201);
+  assert.equal(first.body.code, 'IN-2026-088');
+  assert.equal(first.body.internalContractNo, 'IN-2026-088');
+
+  await request(app)
+    .post('/projects')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      name: '重复人工编号工程',
+      clientName: '测试建设单位',
+      manager: 'alice',
+      internalContractNo: 'in-2026-088',
+      nodes: []
+    })
+    .expect(409);
+});
+
+test('project identity, code and creation time stay immutable after creation', async () => {
+  const { app } = await createResourceTestApp();
+  const cookie = await login(app);
+  const created = await request(app)
+    .post('/projects')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      name: '不可变编号工程',
+      clientName: '测试建设单位',
+      manager: 'alice',
+      internalContractNo: '',
+      nodes: []
+    })
+    .expect(201);
+
+  const updated = await request(app)
+    .put(`/projects/${created.body.id}`)
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      ...created.body,
+      id: 'forged-project-id',
+      code: 'FORGED-CODE',
+      internalContractNo: 'FORGED-CODE',
+      createdAt: '1999-01-01T00:00:00.000Z',
+      name: '允许更新的工程名称'
+    })
+    .expect(200);
+
+  assert.equal(updated.body.id, created.body.id);
+  assert.equal(updated.body.code, created.body.code);
+  assert.equal(updated.body.internalContractNo, created.body.internalContractNo);
+  assert.equal(updated.body.createdAt, created.body.createdAt);
+  assert.equal(updated.body.name, '允许更新的工程名称');
 });
 
 test('approval creation always persists an initial auditable version', async () => {

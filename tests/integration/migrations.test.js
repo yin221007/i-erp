@@ -20,7 +20,8 @@ class FakeMigrationDatabase {
     projects = [],
     archives = [],
     approvals = [],
-    recycleBin = []
+    recycleBin = [],
+    projectSequences = []
   } = {}) {
     this.users = new Map(users.map(record => [record.id, structuredClone(record)]));
     this.production = new Map(
@@ -36,6 +37,7 @@ class FakeMigrationDatabase {
     this.archives = new Map(archives.map(record => [record.id, structuredClone(record)]));
     this.approvals = new Map(approvals.map(record => [record.id, structuredClone(record)]));
     this.recycleBin = new Map(recycleBin.map(record => [record.id, structuredClone(record)]));
+    this.projectSequences = new Map(projectSequences);
     this.migrations = new Set();
     this.snapshot = null;
   }
@@ -56,6 +58,7 @@ class FakeMigrationDatabase {
       archives: structuredClone(this.archives),
       approvals: structuredClone(this.approvals),
       recycleBin: structuredClone(this.recycleBin),
+      projectSequences: structuredClone(this.projectSequences),
       migrations: structuredClone(this.migrations)
     };
   }
@@ -76,6 +79,7 @@ class FakeMigrationDatabase {
     this.archives = this.snapshot.archives;
     this.approvals = this.snapshot.approvals;
     this.recycleBin = this.snapshot.recycleBin;
+    this.projectSequences = this.snapshot.projectSequences;
     this.migrations = this.snapshot.migrations;
     this.snapshot = null;
   }
@@ -192,6 +196,15 @@ class FakeMigrationDatabase {
 
     if (normalized.startsWith('INSERT INTO schema_migrations')) {
       this.migrations.add(parameters[0]);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized.startsWith('INSERT INTO project_contract_sequences')) {
+      const [year, count] = parameters;
+      this.projectSequences.set(
+        year,
+        Math.max(this.projectSequences.get(year) || 0, count)
+      );
       return [{ affectedRows: 1 }, []];
     }
 
@@ -516,9 +529,31 @@ test('approved deletion approvals accidentally recycled are restored for idempot
   );
 });
 
+test('project contract sequence migration counts existing projects by Beijing creation year', async () => {
+  const database = new FakeMigrationDatabase({
+    projects: [
+      { id: 'p-2026-a', createdAt: '2026-01-03T02:00:00.000Z' },
+      { id: 'p-2026-b', createdAt: '2026-12-31T15:59:59.000Z' },
+      { id: 'p-2027', createdAt: '2026-12-31T16:00:00.000Z' },
+      { id: 'p-legacy' }
+    ]
+  });
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.equal(database.projectSequences.get(2026), 2);
+  assert.equal(database.projectSequences.get(2027), 1);
+  assert.equal(
+    database.migrations.has('013_create_project_contract_sequences'),
+    true
+  );
+});
+
 test('recent additive migrations keep their required order', () => {
-  assert.equal(MIGRATION_VERSIONS.at(-4), '009_backfill_owner_scoped_resources');
-  assert.equal(MIGRATION_VERSIONS.at(-3), '010_backfill_project_attachment_archives');
-  assert.equal(MIGRATION_VERSIONS.at(-2), '011_align_production_primary_keys');
-  assert.equal(MIGRATION_VERSIONS.at(-1), '012_restore_auto_deleted_approval_history');
+  assert.equal(MIGRATION_VERSIONS.at(-5), '009_backfill_owner_scoped_resources');
+  assert.equal(MIGRATION_VERSIONS.at(-4), '010_backfill_project_attachment_archives');
+  assert.equal(MIGRATION_VERSIONS.at(-3), '011_align_production_primary_keys');
+  assert.equal(MIGRATION_VERSIONS.at(-2), '012_restore_auto_deleted_approval_history');
+  assert.equal(MIGRATION_VERSIONS.at(-1), '013_create_project_contract_sequences');
 });

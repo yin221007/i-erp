@@ -12,6 +12,7 @@ import {
   isPasswordHash
 } from '../auth/passwords.js';
 import { moveToRecycleBin, withTransaction } from '../services/recycle-bin.js';
+import { assignProjectIdentifiers } from '../services/project-identifiers.js';
 
 const MAX_ARCHIVE_BATCH_SIZE = 30;
 const INVALID_ARCHIVE_TITLE_CHARACTERS = /[\u0000-\u001f\u007f<>:"/\\|?*]/;
@@ -478,10 +479,11 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         }
       }
       let record = await prepareRecord(resource, req.authUser, input);
-      if (!record.id) {
+      const isProjectCreate = resource === 'projects';
+      if (!isProjectCreate && !record.id) {
         return res.status(400).json({ error: 'Record id is required' });
       }
-      if (await readJsonRecord(pool, resource, record.id)) {
+      if (!isProjectCreate && await readJsonRecord(pool, resource, record.id)) {
         return res.status(409).json({ error: 'Record id already exists' });
       }
       const policyContext = await loadPolicyContext(pool, resource, record);
@@ -499,12 +501,25 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         return res.status(403).json({ error: 'Write access denied' });
       }
 
-      await pool.query(
-        `INSERT INTO \`${resource}\`
-          (id, json_data, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)`,
-        [record.id, JSON.stringify(record)]
-      );
+      if (isProjectCreate) {
+        record = await withTransaction(pool, async connection => {
+          const identifiedRecord = await assignProjectIdentifiers(connection, record);
+          await connection.query(
+            `INSERT INTO \`projects\`
+              (id, json_data, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)`,
+            [identifiedRecord.id, JSON.stringify(identifiedRecord)]
+          );
+          return identifiedRecord;
+        });
+      } else {
+        await pool.query(
+          `INSERT INTO \`${resource}\`
+            (id, json_data, updated_at)
+          VALUES (?, ?, CURRENT_TIMESTAMP)`,
+          [record.id, JSON.stringify(record)]
+        );
+      }
       if (onRecordSaved) {
         await onRecordSaved(resource, record, 'create', {
           actor: req.authUser,
@@ -513,6 +528,9 @@ export function createResourceRouter({ pool, onRecordSaved }) {
       }
       res.status(201).json(sanitizeResourceRecord(resource, record));
     } catch (error) {
+      if ([400, 409].includes(error?.statusCode)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       if (error?.code === 'ER_DUP_ENTRY') {
         return res.status(409).json({ error: 'Record id already exists' });
       }
@@ -557,6 +575,17 @@ export function createResourceRouter({ pool, onRecordSaved }) {
       }
 
       let record = await prepareRecord(resource, req.authUser, input, id);
+      if (resource === 'projects') {
+        // 工程内部主键、正式编号和建档时间一经生成即保持不变，避免客户端
+        // 修改后破坏档案、回款、生产等跨模块关联与审计语义。
+        record = {
+          ...record,
+          id: previousRecord.id,
+          code: previousRecord.code,
+          internalContractNo: previousRecord.internalContractNo,
+          createdAt: previousRecord.createdAt
+        };
+      }
       if (['clients', 'equipment', 'docs'].includes(resource)) {
         record = {
           ...record,

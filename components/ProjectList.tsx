@@ -12,8 +12,8 @@ interface ProjectListProps {
   onSelectProject: (project: Project) => void;
   onAddUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
-  onAddProject: (project: Partial<Project>) => void;
-  onUpdateProject?: (project: Project) => void;
+  onAddProject: (project: Partial<Project>) => Promise<boolean>;
+  onUpdateProject?: (project: Project) => boolean | Promise<boolean>;
   onDeleteProject: (projectId: string) => void;
   currentUser: User;
   onAddApproval: (approval: Approval) => void;
@@ -40,6 +40,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
   
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [isSavingProject, setIsSavingProject] = useState(false);
   const [projectFormData, setProjectFormData] = useState({
       name: '', manager: '', clientName: '', startDate: '', deadline: '', contractNo: '', internalContractNo: ''
   });
@@ -170,19 +171,23 @@ const ProjectList: React.FC<ProjectListProps> = ({
       setIsProjectModalOpen(true); 
   };
   
-  const handleSaveProject = () => { 
+  const handleSaveProject = async () => {
+      if (isSavingProject) return;
       if (!projectFormData.name || !projectFormData.clientName) return alert('信息不全'); 
       const payload: Partial<Project> = {
           ...projectFormData,
           status: projectFormData.startDate ? 'Active' : 'Pending',
           progress: editingProject ? editingProject.progress : 0
       };
-      if (editingProject && onUpdateProject) { 
-          onUpdateProject({ ...editingProject, ...payload }); 
-      } else { 
-          onAddProject(payload); 
-      } 
-      setIsProjectModalOpen(false); 
+      setIsSavingProject(true);
+      try {
+          const saved = editingProject && onUpdateProject
+            ? await onUpdateProject({ ...editingProject, ...payload })
+            : await onAddProject(payload);
+          if (saved !== false) setIsProjectModalOpen(false);
+      } finally {
+          setIsSavingProject(false);
+      }
   };
 
   const handleRemoveProject = (e: React.MouseEvent, project: Project) => {
@@ -336,7 +341,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                     <div className="space-y-4 md:space-y-6">
                         <div><label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 md:mb-1.5">工程项目名称 *</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black shadow-inner text-sm md:text-base" value={projectFormData.name} onChange={e => setProjectFormData({...projectFormData, name: e.target.value})} placeholder="例如：某某万象城厨房工程" /></div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                            <div><label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 md:mb-1.5">内部管控编号</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono shadow-inner text-sm md:text-base" value={projectFormData.internalContractNo} onChange={e => setProjectFormData({...projectFormData, internalContractNo: e.target.value})} placeholder="IN-2025-XXXX" /></div>
+                            <div><label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 md:mb-1.5">内部管控编号（可选）</label><input disabled={Boolean(editingProject)} className="w-full border-2 border-slate-100 dark:border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono shadow-inner text-sm md:text-base disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:disabled:bg-slate-800" value={projectFormData.internalContractNo} onChange={e => setProjectFormData({...projectFormData, internalContractNo: e.target.value})} placeholder="留空自动生成，如 2026-08-017" /><p className="mt-1 text-[9px] font-bold text-slate-400">{editingProject ? '工程编号建档后不可修改' : '自动编号按建档年月和公司年度合同顺序生成'}</p></div>
                             <div><label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 md:mb-1.5">甲方合同编号</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono shadow-inner text-sm md:text-base" value={projectFormData.contractNo} onChange={e => setProjectFormData({...projectFormData, contractNo: e.target.value})} placeholder="CT-2025-XXXX" /></div>
                         </div>
                         <div>
@@ -357,7 +362,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
                     </div>
                     <div className="flex justify-end gap-3 md:gap-5 mt-8 md:mt-12 pt-4 md:pt-6 border-t dark:border-slate-700 transition-all">
                         <button onClick={() => setIsProjectModalOpen(false)} className="px-5 md:px-8 py-3 text-slate-500 font-black uppercase tracking-widest text-[10px] md:text-xs">放弃</button>
-                        <button onClick={handleSaveProject} className="px-8 md:px-12 py-3 bg-primary-600 text-white rounded-xl md:rounded-2xl shadow-2xl shadow-primary-500/30 font-black active:scale-95 uppercase tracking-widest text-[10px] md:text-xs">同步台账</button>
+                        <button disabled={isSavingProject} onClick={handleSaveProject} className="px-8 md:px-12 py-3 bg-primary-600 text-white rounded-xl md:rounded-2xl shadow-2xl shadow-primary-500/30 font-black active:scale-95 uppercase tracking-widest text-[10px] md:text-xs disabled:cursor-not-allowed disabled:opacity-60">{isSavingProject ? '同步中...' : '同步台账'}</button>
                     </div>
                 </div>
             </div>

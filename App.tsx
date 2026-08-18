@@ -454,13 +454,16 @@ function App() {
                 : { json: data })
           });
           if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
               if (res.status === 403) {
-                  const errData = await res.json().catch(() => ({}));
                   notify(errData.error || '操作被拒绝：您没有权限修改此数据。', 'error', undefined, 'System');
                   throw new Error('Forbidden');
               }
-              const errText = await res.text();
-              throw new Error(`Failed to sync ${resource}: ${res.status} - ${errText}`);
+              const syncError = new Error(
+                errData.error || `Failed to sync ${resource}: ${res.status}`
+              ) as Error & { status?: number };
+              syncError.status = res.status;
+              throw syncError;
           }
           return res;
       } catch (error) {
@@ -802,28 +805,30 @@ function App() {
   };
   
   const handleAddProject = async (projectPart: Partial<Project>) => {
-      const generatedCode = projectPart.internalContractNo || `PJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`;
-      const newProject = { 
-          id: Math.random().toString(36).substr(2, 9), 
-          name: projectPart.name!, 
-          code: generatedCode,
-          contractNo: projectPart.contractNo,
-          internalContractNo: projectPart.internalContractNo,
-          clientName: projectPart.clientName!, 
-          manager: projectPart.manager!, 
-          startDate: projectPart.startDate!, 
-          deadline: projectPart.deadline!, 
-          status: 'Pending', 
-          progress: 0, 
+      const projectDraft: Partial<Project> = {
+          ...projectPart,
+          id: undefined,
+          code: undefined,
+          status: projectPart.status || 'Pending',
+          progress: projectPart.progress || 0,
           nodes: JSON.parse(JSON.stringify(INITIAL_WORKFLOW)),
-          createdAt: new Date().toISOString(),
-          ...projectPart 
-      } as Project;
-      setProjects(prev => [...prev, newProject]);
+          createdAt: undefined
+      };
       try { 
-          await syncToBackend('projects', 'POST', newProject); 
+          const response = await syncToBackend('projects', 'POST', projectDraft);
+          const savedProject = await response.json() as Project;
+          setProjects(prev => [...prev, savedProject]);
           notify('项目创建成功', 'success'); 
-      } catch (e) { rollbackAfterSyncFailure('创建失败，已恢复服务器最新数据'); }
+          return true;
+      } catch (error) {
+          const status = (error as Error & { status?: number })?.status;
+          rollbackAfterSyncFailure(
+            status === 409
+              ? '工程编号已存在，请修改内部管控编号后重试'
+              : '创建失败，已恢复服务器最新数据'
+          );
+          return false;
+      }
   };
 
   const handleDeleteProject = async (projectId: string) => {
