@@ -1,8 +1,11 @@
 {
   "name": "i-erp",
   "private": true,
-  "version": "1.12.8",
+  "version": "1.12.9",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "test": "node --test --test-concurrency=1",
@@ -43,6 +46,7 @@
     "yaml": "^2.9.0"
   },
   "overrides": {
-    "deepmerge-ts": "8.0.1"
+    "deepmerge-ts": "8.0.1",
+    "qs": "6.16.0"
   }
 }

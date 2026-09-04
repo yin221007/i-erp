@@ -1,4 +1,4 @@
-# i ERP 1.12.8
+# i ERP 1.12.9
 
 i ERP 是面向工程项目管理的私有化 ERP 系统，覆盖工程项目、客户资料、生产进度、审批流程、工程回款、日程提醒、工程档案、设备参数、团队沟通、AI 中心和管理员备份恢复。
 
@@ -114,7 +114,7 @@ npm run verify:release
 2. 更新 `package.json` 和 `package-lock.json`。
 3. 推送更新分支。
 4. 合并到 `main`。
-5. 创建与 `package.json` 一致的 GitHub Release，例如 `v1.12.8`。
+5. 创建与 `package.json` 一致的 GitHub Release，例如 `v1.12.9`。
 6. Release 说明必须包含使用方法、部署方法、验证方法和回退提醒。
 
 ## 数据与隐私

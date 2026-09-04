@@ -143,8 +143,13 @@ test('PDF archives and invoices use the same authenticated mobile viewer', async
   assert.match(previewSource, /\?v=\$\{APP_VERSION\}/);
   assert.match(previewSource, /withCredentials:\s*true/);
   assert.match(previewSource, /isEvalSupported:\s*false/);
-  assert.match(previewSource, /上一页/);
-  assert.match(previewSource, /下一页/);
+  assert.match(previewSource, /IntersectionObserver/);
+  assert.match(previewSource, /data-pdf-page-number/);
+  assert.match(previewSource, /整页/);
+  assert.match(previewSource, /适宽/);
+  assert.match(previewSource, /PdfPageCanvas/);
+  assert.doesNotMatch(previewSource, /aria-label="上一页"/);
+  assert.doesNotMatch(previewSource, /aria-label="下一页"/);
   assert.match(previewSource, /重新加载/);
   assert.match(archiveSource, /<PdfPreview src=\{previewItem\.url\}/);
   assert.match(paymentSource, /<PdfPreview src=\{invoicePreviewItem\.url\}/);
