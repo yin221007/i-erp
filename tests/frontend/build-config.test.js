@@ -29,14 +29,22 @@ test('large feature views are loaded as separate chunks', async () => {
 });
 
 test('container builds use lockfile-only dependency installation', async () => {
-  const [frontend, backend] = await Promise.all([
+  const [frontend, backend, backup, packageSource] = await Promise.all([
     source('Dockerfile'),
-    source('Dockerfile.backend')
+    source('Dockerfile.backend'),
+    source('Dockerfile.backup'),
+    source('package.json')
   ]);
+  const packageJson = JSON.parse(packageSource);
 
   assert.match(frontend, /COPY package\.json package-lock\.json/);
   assert.match(frontend, /RUN npm ci/);
   assert.match(backend, /COPY package\.json package-lock\.json/);
   assert.match(backend, /RUN npm ci --omit=dev/);
   assert.doesNotMatch(`${frontend}\n${backend}`, /npm install/);
+  assert.equal(packageJson.engines.node, '>=22.12.0');
+  for (const dockerfile of [frontend, backend, backup]) {
+    assert.match(dockerfile, /^FROM node:22\.22-alpine/m);
+    assert.doesNotMatch(dockerfile, /^FROM node:20(?:\.|:)/m);
+  }
 });
