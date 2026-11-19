@@ -8,6 +8,13 @@ export const SESSION_COOKIE_NAME = 'ierp_session';
 export const SESSION_IDLE_MILLISECONDS = 12 * 60 * 60 * 1000;
 export const SESSION_ABSOLUTE_MILLISECONDS = 30 * 24 * 60 * 60 * 1000;
 export const SESSION_TOUCH_INTERVAL_MILLISECONDS = 2 * 60 * 1000;
+export const PERSISTENT_SESSION_EXPIRES_AT = new Date(
+  '9999-12-31T23:59:59.000Z'
+);
+// Keep the database sentinel as a literal DATETIME. Passing the UTC Date above
+// through mysql2 in a positive-offset timezone can roll it into year 10000.
+export const PERSISTENT_SESSION_DATABASE_EXPIRES_AT =
+  '9999-12-31 23:59:59.000';
 
 export function hashSessionToken(token) {
   return createHash('sha256').update(token).digest('hex');
@@ -21,15 +28,22 @@ function parseUser(value) {
 export async function createSession(
   pool,
   userId,
-  { userAgent = '', ipAddress = '', now = new Date() } = {}
+  {
+    userAgent = '',
+    ipAddress = '',
+    now = new Date(),
+    persistent = false
+  } = {}
 ) {
   const id = randomUUID();
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashSessionToken(token);
-  const expiresAt = new Date(now.getTime() + SESSION_IDLE_MILLISECONDS);
-  const absoluteExpiresAt = new Date(
-    now.getTime() + SESSION_ABSOLUTE_MILLISECONDS
-  );
+  const expiresAt = persistent
+    ? PERSISTENT_SESSION_DATABASE_EXPIRES_AT
+    : new Date(now.getTime() + SESSION_IDLE_MILLISECONDS);
+  const absoluteExpiresAt = persistent
+    ? PERSISTENT_SESSION_DATABASE_EXPIRES_AT
+    : new Date(now.getTime() + SESSION_ABSOLUTE_MILLISECONDS);
 
   await pool.query(
     `INSERT INTO auth_sessions (
@@ -41,8 +55,9 @@ export async function createSession(
       created_at,
       last_seen_at,
       expires_at,
-      absolute_expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      absolute_expires_at,
+      persistent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       tokenHash,
@@ -52,11 +67,12 @@ export async function createSession(
       now,
       now,
       expiresAt,
-      absoluteExpiresAt
+      absoluteExpiresAt,
+      persistent ? 1 : 0
     ]
   );
 
-  return { id, token, expiresAt, absoluteExpiresAt };
+  return { id, token, expiresAt, absoluteExpiresAt, persistent };
 }
 
 export async function findSessionByToken(pool, token, now = new Date()) {
@@ -71,13 +87,18 @@ export async function findSessionByToken(pool, token, now = new Date()) {
       sessions.last_seen_at,
       sessions.expires_at,
       sessions.absolute_expires_at,
+      sessions.persistent,
       users.json_data
     FROM auth_sessions AS sessions
     INNER JOIN users ON users.id = sessions.user_id
     WHERE sessions.token_hash = ?
       AND sessions.revoked_at IS NULL
-      AND sessions.expires_at > ?
-      AND sessions.absolute_expires_at > ?
+      AND (
+        sessions.persistent = 1 OR (
+          sessions.expires_at > ?
+          AND sessions.absolute_expires_at > ?
+        )
+      )
     LIMIT 1`,
     [tokenHash, now, now]
   );
@@ -87,10 +108,13 @@ export async function findSessionByToken(pool, token, now = new Date()) {
   const absoluteExpiresAt = new Date(row.absolute_expires_at);
   const storedExpiresAt = new Date(row.expires_at);
   const lastSeenAt = new Date(row.last_seen_at);
+  const persistent = row.persistent === 1 || row.persistent === true;
   const lastSeenTimestamp = lastSeenAt.getTime();
   const shouldTouchSession =
-    !Number.isFinite(lastSeenTimestamp) ||
-    now.getTime() - lastSeenTimestamp >= SESSION_TOUCH_INTERVAL_MILLISECONDS;
+    !persistent && (
+      !Number.isFinite(lastSeenTimestamp) ||
+      now.getTime() - lastSeenTimestamp >= SESSION_TOUCH_INTERVAL_MILLISECONDS
+    );
   let expiresAt = storedExpiresAt;
 
   if (shouldTouchSession) {
@@ -113,6 +137,7 @@ export async function findSessionByToken(pool, token, now = new Date()) {
     tokenHash,
     expiresAt,
     absoluteExpiresAt,
+    persistent,
     user: parseUser(row.json_data)
   };
 }
@@ -124,5 +149,15 @@ export async function revokeSessionByToken(pool, token, now = new Date()) {
     SET revoked_at = ?
     WHERE token_hash = ? AND revoked_at IS NULL`,
     [now, hashSessionToken(token)]
+  );
+}
+
+export async function revokeSessionsByUserId(pool, userId, now = new Date()) {
+  if (typeof userId !== 'string' || userId.length === 0) return;
+  await pool.query(
+    `UPDATE auth_sessions
+    SET revoked_at = ?
+    WHERE user_id = ? AND revoked_at IS NULL`,
+    [now, userId]
   );
 }

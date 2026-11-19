@@ -22,6 +22,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

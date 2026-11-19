@@ -36,7 +36,8 @@ class FakeAuthPool {
         createdAt,
         lastSeenAt,
         expiresAt,
-        absoluteExpiresAt
+        absoluteExpiresAt,
+        persistent = false
       ] = parameters;
       this.sessions.set(id, {
         id,
@@ -48,6 +49,7 @@ class FakeAuthPool {
         lastSeenAt,
         expiresAt,
         absoluteExpiresAt,
+        persistent: persistent === true || persistent === 1,
         revokedAt: null
       });
       return [{ affectedRows: 1 }, []];
@@ -59,8 +61,10 @@ class FakeAuthPool {
         item =>
           item.tokenHash === tokenHash &&
           item.revokedAt === null &&
-          item.expiresAt > now &&
-          item.absoluteExpiresAt > now
+          (item.persistent || (
+            item.expiresAt > now &&
+            item.absoluteExpiresAt > now
+          ))
       );
       if (!session) return [[], []];
       const user = this.users.get(session.userId);
@@ -69,6 +73,7 @@ class FakeAuthPool {
         last_seen_at: session.lastSeenAt,
         expires_at: session.expiresAt,
         absolute_expires_at: session.absoluteExpiresAt,
+        persistent: session.persistent ? 1 : 0,
         json_data: JSON.stringify(user)
       }], []];
     }
@@ -180,6 +185,51 @@ test('login issues a secure HttpOnly cookie and returns a safe user', async () =
   );
   assert.equal(response.body.user.nickname, 'admin');
   assert.equal('password' in response.body.user, false);
+});
+
+test('persistent account login has no automatic expiry and remains revocable', async () => {
+  const { app, pool } = await createAuthTestApp();
+  const login = await request(app)
+    .post('/auth/login')
+    .send({
+      username: 'member',
+      password: 'member-password',
+      persistent: true
+    })
+    .expect(200);
+  const cookie = sessionCookie(login);
+
+  assert.match(
+    login.headers['set-cookie'][0],
+    /Expires=Fri, 31 Dec 9999 23:59:59 GMT/
+  );
+  const session = [...pool.sessions.values()][0];
+  assert.equal(session.persistent, true);
+  assert.equal(session.expiresAt, '9999-12-31 23:59:59.000');
+  assert.equal(session.absoluteExpiresAt, '9999-12-31 23:59:59.000');
+  session.expiresAt = new Date('2000-01-01T00:00:00.000Z');
+  session.absoluteExpiresAt = new Date('2000-01-01T00:00:00.000Z');
+
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(200);
+  await request(app)
+    .post('/auth/logout')
+    .set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test')
+    .expect(204);
+  await request(app).get('/auth/me').set('Cookie', cookie).expect(401);
+});
+
+test('normal web login keeps bounded session expiry', async () => {
+  const { app, pool } = await createAuthTestApp();
+  const login = await request(app)
+    .post('/auth/login')
+    .send({ username: 'member', password: 'member-password' })
+    .expect(200);
+
+  assert.doesNotMatch(login.headers['set-cookie'][0], /31 Dec 9999/);
+  const session = [...pool.sessions.values()][0];
+  assert.equal(session.persistent, false);
+  assert.ok(session.absoluteExpiresAt < new Date('9999-01-01T00:00:00.000Z'));
 });
 
 test('login preserves password whitespace exactly', async () => {

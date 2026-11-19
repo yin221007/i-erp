@@ -25,12 +25,21 @@ async function createSecurityTables(connection) {
       last_seen_at DATETIME(3) NOT NULL,
       expires_at DATETIME(3) NOT NULL,
       absolute_expires_at DATETIME(3) NOT NULL,
+      persistent TINYINT(1) NOT NULL DEFAULT 0,
       revoked_at DATETIME(3) NULL,
       PRIMARY KEY (id),
       UNIQUE KEY uq_auth_sessions_token_hash (token_hash),
       KEY idx_auth_sessions_user (user_id),
       KEY idx_auth_sessions_expiry (expires_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
+async function addPersistentAuthSessions(connection) {
+  await connection.query(`
+    ALTER TABLE auth_sessions
+    ADD COLUMN IF NOT EXISTS persistent TINYINT(1) NOT NULL DEFAULT 0
+      AFTER absolute_expires_at
   `);
 }
 
@@ -535,6 +544,11 @@ const MIGRATIONS = Object.freeze([
     version: '013_create_project_contract_sequences',
     transactional: false,
     up: createProjectContractSequences
+  },
+  {
+    version: '014_add_persistent_auth_sessions',
+    transactional: false,
+    up: addPersistentAuthSessions
   }
 ]);
 

@@ -1,0 +1,522 @@
+openapi: 3.1.0
+info:
+  title: iERP Native API
+  version: 1.12.9
+  description: Android and macOS clients for the existing iERP service.
+servers:
+  - url: https://erp.example.com/api
+security:
+  - sessionCookie: []
+tags:
+  - name: Authentication
+  - name: Resources
+  - name: Uploads
+  - name: Email
+  - name: AI
+  - name: Maintenance
+
+paths:
+  /health/live:
+    get:
+      security: []
+      operationId: healthLive
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /health/ready:
+    get:
+      security: []
+      operationId: healthReady
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+        '503': { $ref: '#/components/responses/ErrorResponse' }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Login succeeded and a secure session cookie was issued.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '401': { $ref: '#/components/responses/ErrorResponse' }
+        '429': { $ref: '#/components/responses/ErrorResponse' }
+  /auth/me:
+    get:
+      tags: [Authentication]
+      operationId: currentUser
+      responses:
+        '200':
+          description: Current safe user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/ErrorResponse' }
+    patch:
+      tags: [Authentication]
+      operationId: updateCurrentUser
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '401': { $ref: '#/components/responses/ErrorResponse' }
+  /auth/heartbeat:
+    post:
+      tags: [Authentication]
+      operationId: heartbeat
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+        '401': { $ref: '#/components/responses/ErrorResponse' }
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      responses:
+        '204': { description: Session revoked. }
+        '401': { $ref: '#/components/responses/ErrorResponse' }
+
+  /projects: &resourceCollection
+    get:
+      tags: [Resources]
+      operationId: listProjects
+      responses:
+        '200': { $ref: '#/components/responses/RecordListResponse' }
+        '401': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [Resources]
+      operationId: createProject
+      requestBody: { $ref: '#/components/requestBodies/RecordBody' }
+      responses:
+        '201': { $ref: '#/components/responses/RecordResponse' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '403': { $ref: '#/components/responses/ErrorResponse' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+  /projects/{id}: &resourceItem
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    put:
+      tags: [Resources]
+      operationId: updateProject
+      requestBody: { $ref: '#/components/requestBodies/RecordBody' }
+      responses:
+        '200': { $ref: '#/components/responses/RecordResponse' }
+        '403': { $ref: '#/components/responses/ErrorResponse' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [Resources]
+      operationId: deleteProject
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+        '204': { description: Record already absent. }
+        '403': { $ref: '#/components/responses/ErrorResponse' }
+  /clients: *resourceCollection
+  /clients/{id}: *resourceItem
+  /equipment: *resourceCollection
+  /equipment/{id}: *resourceItem
+  /schedule: *resourceCollection
+  /schedule/{id}: *resourceItem
+  /docs: *resourceCollection
+  /docs/{id}: *resourceItem
+  /archives: *resourceCollection
+  /archives/{id}: *resourceItem
+  /production: *resourceCollection
+  /production/{id}: *resourceItem
+  /users: *resourceCollection
+  /users/{id}: *resourceItem
+  /settings: *resourceCollection
+  /settings/{id}: *resourceItem
+  /payments: *resourceCollection
+  /payments/{id}: *resourceItem
+  /approvals: *resourceCollection
+  /approvals/{id}: *resourceItem
+  /worklogs: *resourceCollection
+  /worklogs/{id}: *resourceItem
+  /messages: *resourceCollection
+  /messages/{id}: *resourceItem
+  /channels: *resourceCollection
+  /channels/{id}: *resourceItem
+  /email_configs: *resourceCollection
+  /email_configs/{id}: *resourceItem
+  /announcements: *resourceCollection
+  /announcements/{id}: *resourceItem
+  /ai_messages: *resourceCollection
+  /ai_messages/{id}: *resourceItem
+  /recycle_bin: *resourceCollection
+  /recycle_bin/{id}: *resourceItem
+
+  /archives/batch:
+    post:
+      tags: [Resources]
+      operationId: createArchiveBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [archives]
+              properties:
+                archives:
+                  type: array
+                  items: { $ref: '#/components/schemas/BusinessRecord' }
+      responses:
+        '201': { $ref: '#/components/responses/RecordListResponse' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '403': { $ref: '#/components/responses/ErrorResponse' }
+  /archives/{id}/name:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    patch:
+      tags: [Resources]
+      operationId: renameArchive
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/RecordResponse' }
+        '403': { $ref: '#/components/responses/ErrorResponse' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+
+  /branding/logo:
+    get:
+      security: []
+      operationId: brandingLogo
+      responses:
+        '200': { $ref: '#/components/responses/BinaryResponse' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+  /upload/config:
+    get:
+      tags: [Uploads]
+      operationId: uploadConfig
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /upload:
+    post:
+      tags: [Uploads]
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+  /upload/chunks/init:
+    post:
+      tags: [Uploads]
+      operationId: initializeChunkUpload
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /upload/chunks/{uploadId}/{index}:
+    parameters:
+      - { name: uploadId, in: path, required: true, schema: { type: string } }
+      - { name: index, in: path, required: true, schema: { type: integer, minimum: 0 } }
+    put:
+      tags: [Uploads]
+      operationId: uploadChunk
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /upload/chunks/{uploadId}/complete:
+    parameters:
+      - { name: uploadId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Uploads]
+      operationId: completeChunkUpload
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /upload/chunks/{uploadId}:
+    parameters:
+      - { name: uploadId, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Uploads]
+      operationId: cancelChunkUpload
+      responses:
+        '204': { description: Upload session removed. }
+  /uploads/{filename}:
+    parameters:
+      - { $ref: '#/components/parameters/Filename' }
+    get:
+      tags: [Uploads]
+      operationId: downloadUpload
+      parameters:
+        - { name: download, in: query, schema: { type: string, enum: ['1'] } }
+      responses:
+        '200': { $ref: '#/components/responses/BinaryResponse' }
+        '206': { $ref: '#/components/responses/BinaryResponse' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [Uploads]
+      operationId: deleteUpload
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+        '403': { $ref: '#/components/responses/ErrorResponse' }
+  /uploads/{filename}/thumbnail:
+    parameters:
+      - { $ref: '#/components/parameters/Filename' }
+    get:
+      tags: [Uploads]
+      operationId: uploadThumbnail
+      parameters:
+        - { name: width, in: query, required: true, schema: { type: integer, enum: [320, 640, 960] } }
+      responses:
+        '200': { $ref: '#/components/responses/BinaryResponse' }
+
+  /email/fetch:
+    get:
+      tags: [Email]
+      operationId: fetchEmail
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /email/messages/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    get:
+      tags: [Email]
+      operationId: emailMessage
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /email/messages/{id}/attachments/{part}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+      - { name: part, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Email]
+      operationId: emailAttachment
+      responses:
+        '200': { $ref: '#/components/responses/BinaryResponse' }
+  /email/send:
+    post:
+      tags: [Email]
+      operationId: sendEmail
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+
+  /ai/models:
+    get:
+      tags: [AI]
+      operationId: aiModels
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+    post:
+      tags: [AI]
+      operationId: createAiModel
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '201': { $ref: '#/components/responses/JsonResponse' }
+  /ai/chat:
+    post:
+      tags: [AI]
+      operationId: aiChat
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200':
+          description: Server-sent event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /ai/settings:
+    get:
+      tags: [AI]
+      operationId: aiSettings
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /ai/settings/{providerId}:
+    parameters:
+      - { name: providerId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [AI]
+      operationId: aiProviderSetting
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+    put:
+      tags: [AI]
+      operationId: updateAiProviderSetting
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+    delete:
+      tags: [AI]
+      operationId: deleteAiProviderSetting
+      responses:
+        '204': { description: Provider secret deleted. }
+  /ai/settings/{providerId}/test:
+    parameters:
+      - { name: providerId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [AI]
+      operationId: testAiProviderSetting
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+
+  /recycle-bin/restore/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    post:
+      operationId: restoreRecycleItem
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /recycle-bin/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    delete:
+      operationId: permanentlyDeleteRecycleItem
+      responses:
+        '204': { description: Recycle item deleted. }
+  /recycle-bin/empty/all:
+    delete:
+      operationId: emptyRecycleBin
+      responses:
+        '204': { description: Recycle bin emptied. }
+  /push/test:
+    post:
+      operationId: testPushConfiguration
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+
+  /backup/catalog:
+    get:
+      tags: [Maintenance]
+      operationId: backupCatalog
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+  /backup/jobs:
+    get:
+      tags: [Maintenance]
+      operationId: maintenanceJobs
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+    post:
+      tags: [Maintenance]
+      operationId: createMaintenanceJob
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '202': { $ref: '#/components/responses/JsonResponse' }
+  /backup/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    get:
+      tags: [Maintenance]
+      operationId: maintenanceJob
+      responses:
+        '200': { $ref: '#/components/responses/JsonResponse' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: ierp_session
+  parameters:
+    RecordId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 255 }
+    Filename:
+      name: filename
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, maxLength: 100 }
+        password: { type: string, maxLength: 1024, writeOnly: true }
+        persistent: { type: boolean, default: true }
+    LoginResponse:
+      type: object
+      required: [user]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      required: [id, nickname, department, role]
+      properties:
+        id: { type: string }
+        nickname: { type: string }
+        department: { type: string }
+        role: { type: string, enum: [Admin, DeptManager, Manager, User] }
+        permission: { type: string, enum: [Read, ReadWrite] }
+        isDefaultAdmin: { type: boolean }
+        avatar: { type: string }
+        lastReadMap: { type: object, additionalProperties: { type: string } }
+        lastActive: { type: string }
+        preferences: { type: object, additionalProperties: true }
+    BusinessRecord:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+      additionalProperties: true
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+      additionalProperties: false
+  requestBodies:
+    JsonBody:
+      required: true
+      content:
+        application/json:
+          schema: { type: object, additionalProperties: true }
+    RecordBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BusinessRecord' }
+  responses:
+    ErrorResponse:
+      description: Request failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    JsonResponse:
+      description: JSON response.
+      content:
+        application/json:
+          schema: { type: object, additionalProperties: true }
+    RecordResponse:
+      description: Business record.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BusinessRecord' }
+    RecordListResponse:
+      description: Visible business records.
+      content:
+        application/json:
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/BusinessRecord' }
+    BinaryResponse:
+      description: Protected binary response.
+      headers:
+        Accept-Ranges:
+          schema: { type: string }
+      content:
+        application/octet-stream:
+          schema: { type: string, format: binary }
