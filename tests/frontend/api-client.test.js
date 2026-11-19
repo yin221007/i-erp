@@ -6,6 +6,8 @@ const apiClientUrl = new URL('../../lib/api.ts', import.meta.url);
 const pollingUrl = new URL('../../lib/polling.js', import.meta.url);
 const appUrl = new URL('../../App.tsx', import.meta.url);
 const loginUrl = new URL('../../components/Login.tsx', import.meta.url);
+const headerUrl = new URL('../../components/Header.tsx', import.meta.url);
+const indexCssUrl = new URL('../../index.css', import.meta.url);
 const systemSettingsUrl = new URL(
   '../../components/SystemSettings.tsx',
   import.meta.url
@@ -87,6 +89,27 @@ test('user passwords stay exact, masked, and optional during profile edits', asy
   assert.match(userManagerSource, /type="password"/);
   assert.match(userManagerSource, /留空则保持不变/);
   assert.doesNotMatch(constantsSource, /password:\s*['\"]password['\"]/);
+});
+
+test('mobile login and header controls expose reliable touch and input semantics', async () => {
+  const [loginSource, headerSource, cssSource] = await Promise.all([
+    readFile(loginUrl, 'utf8'),
+    readFile(headerUrl, 'utf8'),
+    readFile(indexCssUrl, 'utf8')
+  ]);
+
+  assert.match(loginSource, /name="username"/);
+  assert.match(loginSource, /autoComplete="username"/);
+  assert.match(loginSource, /autoCapitalize="none"/);
+  assert.match(loginSource, /spellCheck=\{false\}/);
+  assert.match(loginSource, /name="password"/);
+  assert.match(loginSource, /autoComplete="current-password"/);
+  assert.match(loginSource, /aria-label=\{showPassword/);
+  assert.match(headerSource, /aria-label="打开导航菜单"/);
+  assert.match(headerSource, /aria-label="切换主题"/);
+  assert.match(headerSource, /aria-label="打开通知"/);
+  assert.match(headerSource, /min-h-11 min-w-11/);
+  assert.match(cssSource, /touch-action:\s*manipulation/);
 });
 
 test('external document URLs are protocol-checked and never embedded as live pages', async () => {

@@ -63,6 +63,21 @@ class FakeResourcePool {
       return [{ affectedRows: 1 }, []];
     }
 
+    if (
+      normalized.startsWith('UPDATE auth_sessions SET revoked_at') &&
+      normalized.includes('WHERE user_id = ?')
+    ) {
+      const [revokedAt, userId] = parameters;
+      let affectedRows = 0;
+      for (const session of this.sessions.values()) {
+        if (session.userId === userId && !session.revokedAt) {
+          session.revokedAt = revokedAt;
+          affectedRows += 1;
+        }
+      }
+      return [{ affectedRows }, []];
+    }
+
     if (normalized === 'SELECT json_data FROM users WHERE id = ? LIMIT 1') {
       const user = this.users.get(parameters[0]);
       return [user ? [{ json_data: JSON.stringify(user) }] : [], []];
@@ -302,6 +317,31 @@ test('updating safe user fields preserves hidden credentials and preferences', a
     sound: true,
     webhooks: { pushPlusToken: 'private-token' }
   });
+});
+
+test('changing a password revokes every existing session for that user', async () => {
+  const { app } = await createResourceTestApp();
+  const memberCookie = await login(app);
+  const adminCookie = await loginAdmin(app);
+
+  await request(app)
+    .put('/users/u-2')
+    .set('Cookie', adminCookie)
+    .set('Origin', 'https://erp.example.test')
+    .send({
+      nickname: 'alice',
+      password: 'new-alice-password',
+      department: '工程部',
+      role: 'User',
+      permission: 'ReadWrite',
+      avatar: ''
+    })
+    .expect(200);
+
+  await request(app)
+    .get('/auth/me')
+    .set('Cookie', memberCookie)
+    .expect(401);
 });
 
 test('user creation validates passwords and case-insensitive unique usernames', async () => {

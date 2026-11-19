@@ -84,10 +84,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, appName, logoUrl }) => {
            )}
 
            <div className="space-y-2">
-             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">用户名</label>
+             <label htmlFor="ierp-username" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">用户名</label>
              <div className="relative group">
                <input 
+                 id="ierp-username"
+                 name="username"
                  type="text"
+                 autoComplete="username"
+                 autoCapitalize="none"
+                 autoCorrect="off"
+                 spellCheck={false}
                  className="w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all font-bold text-slate-800 placeholder:text-slate-300 text-base"
                  placeholder="请输入用户名"
                  value={username}
@@ -98,10 +104,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, appName, logoUrl }) => {
            </div>
 
            <div className="space-y-2">
-             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">登录密码</label>
+             <label htmlFor="ierp-password" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">登录密码</label>
              <div className="relative group">
                <input 
+                 id="ierp-password"
+                 name="password"
                  type={showPassword ? "text" : "password"}
+                 autoComplete="current-password"
                  className="w-full pl-12 pr-14 py-3.5 rounded-2xl border-2 border-slate-100 bg-slate-50 focus:bg-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all font-bold text-slate-800 placeholder:text-slate-300 text-base"
                  placeholder="请输入密码"
                  value={password}
@@ -111,7 +120,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, appName, logoUrl }) => {
                <button
                  type="button"
                  onClick={() => setShowPassword(!showPassword)}
-                 className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-primary-600 focus:outline-none transition-colors p-1"
+                 aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                 title={showPassword ? '隐藏密码' : '显示密码'}
+                 className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 flex items-center justify-center text-slate-300 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500 rounded-xl transition-colors"
                >
                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                </button>

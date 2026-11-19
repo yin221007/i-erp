@@ -91,6 +91,13 @@ class FakeMigrationDatabase {
 
     if (normalized.startsWith('CREATE TABLE IF NOT EXISTS')) return [[], []];
 
+    if (
+      normalized.startsWith('ALTER TABLE auth_sessions') &&
+      normalized.includes('ADD COLUMN IF NOT EXISTS persistent')
+    ) {
+      return [{ affectedRows: 0 }, []];
+    }
+
     if (normalized.startsWith('SELECT version FROM schema_migrations')) {
       return [[...this.migrations].map(version => ({ version })), []];
     }
@@ -384,6 +391,22 @@ test('maintenance audit storage is added through an idempotent additive migratio
   assert.equal(database.migrations.has('006_create_maintenance_jobs'), true);
 });
 
+test('persistent native sessions use an additive idempotent migration', async () => {
+  const database = new FakeMigrationDatabase();
+
+  await runMigrations(database);
+  await runMigrations(database);
+
+  assert.equal(
+    database.migrations.has('014_add_persistent_auth_sessions'),
+    true
+  );
+  assert.equal(
+    MIGRATION_VERSIONS.at(-1),
+    '014_add_persistent_auth_sessions'
+  );
+});
+
 test('user permission migration keeps legacy accounts writable explicitly', async () => {
   const database = new FakeMigrationDatabase({
     users: [
@@ -551,9 +574,10 @@ test('project contract sequence migration counts existing projects by Beijing cr
 });
 
 test('recent additive migrations keep their required order', () => {
-  assert.equal(MIGRATION_VERSIONS.at(-5), '009_backfill_owner_scoped_resources');
-  assert.equal(MIGRATION_VERSIONS.at(-4), '010_backfill_project_attachment_archives');
-  assert.equal(MIGRATION_VERSIONS.at(-3), '011_align_production_primary_keys');
-  assert.equal(MIGRATION_VERSIONS.at(-2), '012_restore_auto_deleted_approval_history');
-  assert.equal(MIGRATION_VERSIONS.at(-1), '013_create_project_contract_sequences');
+  assert.equal(MIGRATION_VERSIONS.at(-6), '009_backfill_owner_scoped_resources');
+  assert.equal(MIGRATION_VERSIONS.at(-5), '010_backfill_project_attachment_archives');
+  assert.equal(MIGRATION_VERSIONS.at(-4), '011_align_production_primary_keys');
+  assert.equal(MIGRATION_VERSIONS.at(-3), '012_restore_auto_deleted_approval_history');
+  assert.equal(MIGRATION_VERSIONS.at(-2), '013_create_project_contract_sequences');
+  assert.equal(MIGRATION_VERSIONS.at(-1), '014_add_persistent_auth_sessions');
 });

@@ -11,6 +11,7 @@ import {
   hashPassword,
   isPasswordHash
 } from '../auth/passwords.js';
+import { revokeSessionsByUserId } from '../auth/sessions.js';
 import { moveToRecycleBin, withTransaction } from '../services/recycle-bin.js';
 import { assignProjectIdentifiers } from '../services/project-identifiers.js';
 
@@ -638,6 +639,13 @@ export function createResourceRouter({ pool, onRecordSaved }) {
         VALUES (?, ?, CURRENT_TIMESTAMP)`,
         [id, JSON.stringify(record)]
       );
+      if (
+        resource === 'users' &&
+        typeof req.body?.password === 'string' &&
+        req.body.password.length > 0
+      ) {
+        await revokeSessionsByUserId(pool, id);
+      }
       if (onRecordSaved) {
         await onRecordSaved(resource, record, 'update', {
           actor: req.authUser,

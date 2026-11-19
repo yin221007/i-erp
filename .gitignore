@@ -29,3 +29,10 @@ output/playwright/
 *.njsproj
 *.sln
 *.sw?
+
+# Native application build output and local SDK configuration
+apps/android/.gradle/
+apps/android/**/build/
+apps/android/local.properties
+apps/macos/.build/
+apps/macos/Resources/iERP.iconset/

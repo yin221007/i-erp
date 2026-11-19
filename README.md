@@ -1,4 +1,4 @@
-# i ERP 1.12.9
+# i ERP 1.12.10
 
 i ERP 是面向工程项目管理的私有化 ERP 系统，覆盖工程项目、客户资料、生产进度、审批流程、工程回款、日程提醒、工程档案、设备参数、团队沟通、AI 中心和管理员备份恢复。
 
@@ -75,6 +75,24 @@ npm run verify:release
 
 发布前至少执行 `npm run verify:release`。它会覆盖测试、生产构建和发布配置校验。
 
+## Android 与 macOS 原生客户端
+
+仓库包含 Kotlin/Jetpack Compose Android 客户端和 Swift/SwiftUI macOS 客户端。两端使用现有账号密码登录，由系统安全 Cookie 保持会话，不要求用户输入令牌。
+
+Android 在同一个系统 WebView 中完成登录和业务操作，macOS 使用原生登录页并在 WebView 中承载业务页面。登录后直接运行网页端现有页面和权限逻辑。Android 补充触摸返回、相机/文件上传和鉴权下载，macOS 补充窗口导航、文件选择与下载。AI 中心在客户端内隐藏。
+
+- Android 工程：`apps/android`
+- macOS 工程：`apps/macos`
+- 原生 API 契约：`api-contract/openapi.yaml`
+- 客户端构建时使用 `IERP_ORIGIN` 指定 HTTPS 服务源（可包含端口，不能包含路径）。不配置时使用示例地址。
+
+```bash
+# Android
+(cd apps/android && IERP_ORIGIN=https://erp.example.com ./gradlew assembleDebug)
+# macOS
+(cd apps/macos && IERP_ORIGIN=https://erp.example.com ./package-app.sh)
+```
+
 ## 群晖部署方法
 
 生产部署采用蓝绿发布，核心原则是：先备份、再演练、再切换，旧版本必须保留可回退。
@@ -114,7 +132,7 @@ npm run verify:release
 2. 更新 `package.json` 和 `package-lock.json`。
 3. 推送更新分支。
 4. 合并到 `main`。
-5. 创建与 `package.json` 一致的 GitHub Release，例如 `v1.12.9`。
+5. 创建与 `package.json` 一致的 GitHub Release，例如 `v1.12.10`。
 6. Release 说明必须包含使用方法、部署方法、验证方法和回退提醒。
 
 ## 数据与隐私

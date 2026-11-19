@@ -4,6 +4,7 @@ import { requireAuth } from '../auth/middleware.js';
 import { createFailureLimiter } from '../services/failure-limiter.js';
 import {
   createSession,
+  PERSISTENT_SESSION_EXPIRES_AT,
   revokeSessionByToken,
   SESSION_COOKIE_NAME,
   SESSION_IDLE_MILLISECONDS
@@ -91,17 +92,24 @@ export function createAuthRouter({
       }
 
       loginLimiter.clear(limiterKey);
+      const persistent = req.body?.persistent === true;
       const session = await createSession(pool, user.id, {
         userAgent: req.get('user-agent') || '',
-        ipAddress: req.ip
+        ipAddress: req.ip,
+        persistent
       });
-      res.cookie(SESSION_COOKIE_NAME, session.token, {
+      const cookieOptions = {
         httpOnly: true,
         secure: true,
         sameSite: 'lax',
-        path: '/',
-        maxAge: SESSION_IDLE_MILLISECONDS
-      });
+        path: '/'
+      };
+      if (persistent) {
+        cookieOptions.expires = PERSISTENT_SESSION_EXPIRES_AT;
+      } else {
+        cookieOptions.maxAge = SESSION_IDLE_MILLISECONDS;
+      }
+      res.cookie(SESSION_COOKIE_NAME, session.token, cookieOptions);
       return res.json({ user: toSafeUser(user) });
     } catch (error) {
       next(error);
