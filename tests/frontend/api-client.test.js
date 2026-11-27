@@ -315,14 +315,18 @@ test('preview feedback keeps personal headings, a complete status ring, and cust
 });
 
 test('production list preserves source order and supports actual specs plus bulk deletion', async () => {
-  const source = await readFile(productionProgressUrl, 'utf8');
+  const [source, preview, sheet] = await Promise.all([
+    readFile(productionProgressUrl, 'utf8'),
+    readFile(new URL('../../components/ProductionImportDialog.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../../components/ProductionSheet.tsx', import.meta.url), 'utf8')
+  ]);
 
   assert.match(source, /sortProductionUnitsBySourceOrder/);
-  assert.match(source, /actualProductionSpec/);
-  assert.match(source, /实际生产规格（可编辑）/);
-  assert.match(source, /全选识别设备/);
+  assert.match(sheet, /table\.rows\.map/);
+  assert.match(preview, /actualProductionSpec/);
+  assert.match(preview, /实际生产规格/);
+  assert.match(source, /全选此表/);
   assert.match(source, /删除选中/);
-  assert.match(source, /toggleAllItemSelection/);
   assert.doesNotMatch(source, /getSerialSortValue/);
 });
 

@@ -17,3 +17,12 @@ export function appendProductionUnitsInSourceOrder(
   existingItems: ProjectProduction['items'],
   newItems: ProjectProduction['items']
 ): ProjectProduction['items'];
+
+export function changeProductionShipment(
+  record: ProjectProduction,
+  itemId: string,
+  shipped: boolean,
+  date?: string
+): ProjectProduction;
+
+export function isProductionShipmentDate(value: unknown): value is string;

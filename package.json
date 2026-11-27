@@ -19,6 +19,7 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "imapflow": "^1.4.3",
+    "jszip": "3.10.1",
     "lucide-react": "^0.344.0",
     "lunar-javascript": "^1.6.12",
     "mailparser": "^3.9.14",
@@ -30,7 +31,8 @@
     "react-dom": "^18.2.0",
     "recharts": "^2.10.3",
     "sanitize-html": "^2.17.5",
-    "sharp": "0.35.3"
+    "sharp": "0.35.3",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

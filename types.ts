@@ -196,12 +196,43 @@ export interface ProductionUnit {
   createdAt?: string;
 }
 
+export interface ProductionSourceCell {
+  column: number;
+  text: string;
+  colSpan?: number;
+  rowSpan?: number;
+}
+
+export interface ProductionSourceRow {
+  cells: ProductionSourceCell[];
+  header?: boolean;
+  itemId?: string;
+}
+
+export interface ProductionSourceTable {
+  id: string;
+  title: string;
+  fileName: string;
+  columnCount: number;
+  rows: ProductionSourceRow[];
+}
+
+export interface ProductionItemDetails {
+  sourcing?: 'InHouse' | 'Outsourced';
+  outsourcedInstallation?: boolean;
+  shipmentDate?: string;
+  statusBeforeShipment?: Exclude<ProductionStatus, 'Shipped'>;
+}
+
 export interface ProjectProduction {
   id: string;
   projectId: string;
   projectName: string;
   projectCode: string;
   items: ProductionUnit[];
+  // 存在项目记录上，旧版编辑设备时仍会带回这两个字段。
+  sourceTables?: ProductionSourceTable[];
+  itemDetails?: Record<string, ProductionItemDetails>;
   createdAt?: string;
 }
 
