@@ -1,12 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ProjectProduction, ProductionUnit, ProductionStatus, User, Project } from '../types';
-import { Search, ArrowLeft, Plus, Edit2, X, Save, Trash2, Download, Upload, FileSpreadsheet, PackageCheck, Truck, ClipboardList } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Download, Edit2, Plus, Search, Upload } from 'lucide-react';
+import type { ProductionItemDetails, ProductionSourceTable, ProductionStatus, ProductionUnit, Project, ProjectProduction, User } from '../types';
 import { getBeijingDateString } from '../constants';
-import { rowsToProductionUnits } from '../lib/production-import.js';
-import {
-  appendProductionUnitsInSourceOrder,
-  sortProductionUnitsBySourceOrder
-} from '../lib/production-records.js';
+import { appendProductionUnitsInSourceOrder, changeProductionShipment, isProductionShipmentDate, sortProductionUnitsBySourceOrder } from '../lib/production-records.js';
+import { prepareProductionTable, readProductionTables } from '../lib/production-table-import.js';
+import { exportProductionWorkbook, legacyProductionTable, productionActionHeaders, productionSourcingLabels, productionStatusLabels } from '../lib/production-sheet-export';
+import ProductionImportDialog from './ProductionImportDialog';
+import ProductionSheet from './ProductionSheet';
 
 interface ProductionProgressProps {
   projects: Project[];
@@ -17,23 +17,7 @@ interface ProductionProgressProps {
   initialProjectId?: string | null;
 }
 
-type ProductionSummary = {
-  project: Project;
-  record: ProjectProduction;
-  waiting: number;
-  inStock: number;
-  shipped: number;
-  total: number;
-  completionRate: number;
-};
-
-const statusMeta: Record<ProductionStatus, { label: string; short: string; icon: React.ReactNode; tone: string }> = {
-  Waiting: { label: '待生产', short: '待生产', icon: <ClipboardList className="w-4 h-4" />, tone: 'amber' },
-  InStock: { label: '已生产 / 已入库', short: '已入库', icon: <PackageCheck className="w-4 h-4" />, tone: 'sky' },
-  Shipped: { label: '已发货', short: '已发货', icon: <Truck className="w-4 h-4" />, tone: 'emerald' }
-};
-
-const createEmptyRecord = (project?: Project): ProjectProduction => ({
+const emptyRecord = (project?: Project): ProjectProduction => ({
   id: project?.id || '',
   projectId: project?.id || '',
   projectName: project?.name || '',
@@ -44,93 +28,31 @@ const createEmptyRecord = (project?: Project): ProjectProduction => ({
 const sumByStatus = (items: ProductionUnit[], status: ProductionStatus) =>
   items.filter(item => item.status === status).reduce((sum, item) => sum + (item.quantity || 0), 0);
 
-const parseCsvLine = (line: string) => line.split(/,(?=(?:(?:[^\"]*\"){2})*[^\"]*$)/).map(part => part.replace(/^\"|\"$/g, '').trim());
+const cellClass = 'border border-slate-200 px-3 py-2 text-sm dark:border-slate-700';
+const controlClass = 'min-h-9 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900 disabled:opacity-60';
+const buttonClass = 'inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-900 disabled:opacity-50';
+const primaryClass = 'rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50';
+const blankItem = () => ({
+  name: '', model: '', serialNumber: '', actualProductionSpec: '',
+  quantity: '1', batchDate: getBeijingDateString()
+});
 
-const parseProductionCsv = (text: string, defaultStatus: ProductionStatus): ProductionUnit[] => {
-  const rows = text.split(/\r\n|\n/).map(line => line.trim()).filter(Boolean).map(parseCsvLine);
-  return rowsToProductionUnits(rows, defaultStatus);
-};
+type Editor = { kind: 'note'; item: ProductionUnit; value: string; actualSpec: string } |
+  { kind: 'shipment'; ids: string[]; shipped: boolean; date: string } |
+  { kind: 'device'; item?: ProductionUnit; values: ReturnType<typeof blankItem> };
 
-const inflateZipData = async (data: Uint8Array, method: number) => {
-  if (method === 0) return data;
-  if (method !== 8) throw new Error('Excel 文件压缩格式暂不支持，请另存为 .xlsx 后重试');
-  const DecompressionStreamCtor = (globalThis as any).DecompressionStream;
-  if (!DecompressionStreamCtor) throw new Error('当前浏览器不支持直接解析 Excel，请另存为 CSV 后导入');
-  const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-  const stream = new Blob([arrayBuffer]).stream().pipeThrough(new DecompressionStreamCtor('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-};
-
-const readXlsxZipEntries = async (buffer: ArrayBuffer) => {
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-  const decoder = new TextDecoder();
-  const entries: Record<string, string> = {};
-
-  for (let offset = 0; offset < view.byteLength - 46; offset += 1) {
-    if (view.getUint32(offset, true) !== 0x02014b50) continue;
-    const method = view.getUint16(offset + 10, true);
-    const compressedSize = view.getUint32(offset + 20, true);
-    const nameLength = view.getUint16(offset + 28, true);
-    const extraLength = view.getUint16(offset + 30, true);
-    const commentLength = view.getUint16(offset + 32, true);
-    const localHeaderOffset = view.getUint32(offset + 42, true);
-    const name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
-    const localNameLength = view.getUint16(localHeaderOffset + 26, true);
-    const localExtraLength = view.getUint16(localHeaderOffset + 28, true);
-    const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
-    const raw = bytes.slice(dataStart, dataStart + compressedSize);
-    const inflated = await inflateZipData(raw, method);
-    if (name.endsWith('.xml')) entries[name] = decoder.decode(inflated);
-    offset += 45 + nameLength + extraLength + commentLength;
-  }
-
-  return entries;
-};
-
-const getNodeText = (node: Element, tagName: string) => Array.from(node.getElementsByTagName(tagName)).map(item => item.textContent || '').join('');
-
-const columnIndexFromRef = (ref: string) => {
-  const letters = (ref.match(/[A-Z]+/) || [''])[0];
-  return letters.split('').reduce((sum, char) => sum * 26 + char.charCodeAt(0) - 64, 0) - 1;
-};
-
-const parseProductionXlsx = async (buffer: ArrayBuffer, defaultStatus: ProductionStatus): Promise<ProductionUnit[]> => {
-  const entries = await readXlsxZipEntries(buffer);
-  const parser = new DOMParser();
-  const sharedXml = entries['xl/sharedStrings.xml'];
-  const sharedStrings = sharedXml
-    ? Array.from(parser.parseFromString(sharedXml, 'application/xml').getElementsByTagName('si')).map(si => getNodeText(si, 't'))
-    : [];
-  const sheetName = Object.keys(entries).filter(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort()[0];
-  if (!sheetName) throw new Error('Excel 文件中没有找到工作表');
-
-  const sheet = parser.parseFromString(entries[sheetName], 'application/xml');
-  const rows = Array.from(sheet.getElementsByTagName('row')).map(row => {
-    const values: string[] = [];
-    Array.from(row.getElementsByTagName('c')).forEach(cell => {
-      const ref = cell.getAttribute('r') || '';
-      const index = Math.max(columnIndexFromRef(ref), values.length);
-      const type = cell.getAttribute('t');
-      const raw = getNodeText(cell, 'v') || getNodeText(cell, 't');
-      values[index] = type === 's' ? sharedStrings[Number(raw)] || '' : raw;
-    });
-    return values;
-  });
-  return rowsToProductionUnits(rows, defaultStatus);
-};
-
-const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, productionData, onUpdateProject, onDeleteProjectProduction, currentUser, initialProjectId }) => {
+export default function ProductionProgress({ projects, productionData, onUpdateProject, currentUser, initialProjectId }: ProductionProgressProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<ProductionUnit | null>(null);
-  const [formData, setFormData] = useState({ serialNumber: '', name: '', model: '', actualProductionSpec: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status: 'Waiting' as ProductionStatus });
-  const [importPreview, setImportPreview] = useState<{ fileName: string; items: ProductionUnit[] } | null>(null);
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
-  const [selectedPreviewItemIds, setSelectedPreviewItemIds] = useState<Set<string>>(new Set());
-  const [isImportSaving, setIsImportSaving] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<ProductionSourceTable[] | null>(null);
+  const [activeTableId, setActiveTableId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const savingRef = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialProjectId && projects.some(project => project.id === initialProjectId)) {
@@ -139,243 +61,235 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
   }, [initialProjectId, projects]);
 
   useEffect(() => {
-    setSelectedItemIds(new Set());
+    setSelectedIds(new Set());
+    setActiveTableId(null);
+    setEditor(null);
+    setPreview(null);
+    setFeedback('');
   }, [selectedProjectId]);
 
-  const activeProject = projects.find(p => p.id === selectedProjectId);
-  const activeProductionData = productionData.find(p => p.projectId === selectedProjectId) || createEmptyRecord(activeProject);
-  const canEditActiveProduction = Boolean(
-    activeProject &&
-    (
-      currentUser.isDefaultAdmin === true ||
-      currentUser.role === 'Admin' ||
-      (
-        currentUser.permission === 'ReadWrite' &&
-        (
-          activeProject.manager === currentUser.nickname ||
-          ['总经办', '工程部', '生产部'].includes(currentUser.department)
-        )
-      )
-    )
+  const project = projects.find(item => item.id === selectedProjectId);
+  const record = productionData.find(item => item.projectId === selectedProjectId) || emptyRecord(project);
+  const canEdit = Boolean(project && (
+    currentUser.isDefaultAdmin === true || currentUser.role === 'Admin' ||
+    (currentUser.permission === 'ReadWrite' &&
+      (project.manager === currentUser.nickname || ['总经办', '工程部', '生产部'].includes(currentUser.department)))
+  ));
+  const items = useMemo(() => new Map(record.items.map(item => [item.id, item])), [record.items]);
+  const tables = useMemo(() => {
+    const sourceTables = record.sourceTables || [];
+    const linked = new Set(sourceTables.flatMap(table => table.rows.flatMap(row => row.itemId ? [row.itemId] : [])));
+    const legacy = sortProductionUnitsBySourceOrder(record.items.filter(item => !linked.has(item.id)));
+    return [...(legacy.length ? [legacyProductionTable(legacy)] : []), ...sourceTables];
+  }, [record]);
+  const activeTable = tables.find(table => table.id === activeTableId) ?? tables[0];
+  const visibleItemIds = activeTable?.rows.flatMap(row => row.itemId && items.has(row.itemId) ? [row.itemId] : []) || [];
+
+  const summaries = projects.map(projectItem => {
+    const list = productionData.find(item => item.projectId === projectItem.id)?.items || [];
+    const waiting = sumByStatus(list, 'Waiting');
+    const inStock = sumByStatus(list, 'InStock');
+    const shipped = sumByStatus(list, 'Shipped');
+    const total = waiting + inStock + shipped;
+    return { project: projectItem, waiting, inStock, shipped, total, completionRate: total ? Math.round(shipped / total * 100) : 0 };
+  });
+  const search = searchTerm.toLowerCase();
+  const filteredSummaries = summaries.filter(({ project: item }) =>
+    [item.name, item.clientName, item.manager].some(value => value.toLowerCase().includes(search))
   );
 
-  const summaries: ProductionSummary[] = projects.map(project => {
-    const record = productionData.find(item => item.projectId === project.id) || createEmptyRecord(project);
-    const waiting = sumByStatus(record.items, 'Waiting');
-    const inStock = sumByStatus(record.items, 'InStock');
-    const shipped = sumByStatus(record.items, 'Shipped');
-    const total = waiting + inStock + shipped;
-    return { project, record, waiting, inStock, shipped, total, completionRate: total > 0 ? Math.round((shipped / total) * 100) : 0 };
+  const save = async (next: ProjectProduction, message = '已保存') => {
+    if (!project || !canEdit || savingRef.current) return false;
+    // 生产接口接收整份工程记录，限制请求体并避免本页面同时写入两个版本。
+    if (new Blob([JSON.stringify(next)]).size > 2 * 1024 * 1024) {
+      setFeedback('此工程的清单超过现有服务器的保存上限。已保留预览，请减少本次导入的内容。');
+      return false;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setFeedback('');
+    try {
+      const saved = await onUpdateProject(next);
+      setFeedback(saved ? message : '保存失败，请重试。');
+      return saved;
+    } catch {
+      setFeedback('保存失败，请重试。');
+      return false;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  const importFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file || !canEdit) return;
+    setLoadingFile(true);
+    setFeedback('');
+    try {
+      setPreview(await readProductionTables(file));
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : '无法读取此表格。');
+    } finally {
+      setLoadingFile(false);
+    }
+  };
+
+  const confirmImport = async (drafts: ReturnType<typeof prepareProductionTable>[]) => {
+    const sourceTables = record.sourceTables || [];
+    const pending = drafts.filter(draft => !sourceTables.some(table => table.id === draft.table.id));
+    if (pending.length === 0) {
+      setPreview(null);
+      setFeedback('此批表格已导入。');
+      return true;
+    }
+    const duplicates = pending.some(({ table }) => sourceTables.some(previous =>
+      previous.title === table.title && previous.fileName === table.fileName &&
+      JSON.stringify(previous.rows.map(row => row.cells)) === JSON.stringify(table.rows.map(row => row.cells))
+    ));
+    if (duplicates && !window.confirm('此工程已有内容相同的表格，确定再导入一份吗？')) return false;
+    const newItems = pending.flatMap(draft => draft.items);
+    const saved = await save({
+      ...record,
+      sourceTables: [...sourceTables, ...pending.map(draft => draft.table)],
+      items: appendProductionUnitsInSourceOrder(record.items, newItems)
+    }, '已导入 ' + newItems.length + ' 条设备。');
+    if (saved) {
+      setPreview(null);
+      setSelectedIds(new Set());
+      setActiveTableId(pending.find(draft => draft.items.length)?.table.id || pending[0].table.id);
+    }
+    return saved;
+  };
+
+  const updateDetails = (id: string, change: ProductionItemDetails) => {
+    void save({
+      ...record,
+      itemDetails: { ...record.itemDetails, [id]: { ...record.itemDetails?.[id], ...change } }
+    });
+  };
+
+  const toggleSelection = (id: string) => setSelectedIds(previous => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
   });
 
-  const filteredSummaries = summaries.filter(item =>
-    item.project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.project.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.project.manager.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const updateItems = async (items: ProductionUnit[]) => {
-    if (!activeProject || !canEditActiveProduction) return false;
-    return onUpdateProject({
-      ...activeProductionData,
-      ...createEmptyRecord(activeProject),
-      id: activeProductionData.id || activeProject.id,
-      items
+  const openShipment = (ids: string[]) => {
+    setFeedback('');
+    const item = ids.length === 1 ? items.get(ids[0]) : undefined;
+    const date = item && record.itemDetails?.[item.id]?.shipmentDate;
+    setEditor({
+      kind: 'shipment', ids, shipped: item ? item.status === 'Shipped' : true,
+      date: isProductionShipmentDate(date) ? date : getBeijingDateString()
     });
   };
 
-  const toggleItemSelection = (itemId: string) => {
-    setSelectedItemIds(current => {
-      const next = new Set(current);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      return next;
-    });
-  };
-
-  const allItemsSelected =
-    activeProductionData.items.length > 0 &&
-    activeProductionData.items.every(item => selectedItemIds.has(item.id));
-
-  const toggleAllItemSelection = () => {
-    setSelectedItemIds(
-      allItemsSelected
-        ? new Set()
-        : new Set(activeProductionData.items.map(item => item.id))
-    );
-  };
-
-  const deleteSelectedItems = async () => {
-    if (!canEditActiveProduction || selectedItemIds.size === 0) return;
-    if (!window.confirm(`确定删除选中的 ${selectedItemIds.size} 项设备吗？`)) return;
-    const saved = await updateItems(
-      activeProductionData.items.filter(item => !selectedItemIds.has(item.id))
-    );
-    if (saved) setSelectedItemIds(new Set());
-  };
-
-  const deleteSingleItem = async (itemId: string) => {
-    if (!canEditActiveProduction || !window.confirm('确定移除此项吗？')) return;
-    const saved = await updateItems(
-      activeProductionData.items.filter(item => item.id !== itemId)
-    );
-    if (!saved) return;
-    setSelectedItemIds(current => {
-      const next = new Set(current);
-      next.delete(itemId);
-      return next;
-    });
-  };
-
-  const togglePreviewItemSelection = (itemId: string) => {
-    setSelectedPreviewItemIds(current => {
-      const next = new Set(current);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      return next;
-    });
-  };
-
-  const allPreviewItemsSelected = Boolean(
-    importPreview?.items.length &&
-    importPreview.items.every(item => selectedPreviewItemIds.has(item.id))
-  );
-
-  const toggleAllPreviewItemSelection = () => {
-    if (!importPreview) return;
-    setSelectedPreviewItemIds(
-      allPreviewItemsSelected
-        ? new Set()
-        : new Set(importPreview.items.map(item => item.id))
-    );
-  };
-
-  const deleteSelectedPreviewItems = () => {
-    if (!importPreview || selectedPreviewItemIds.size === 0) return;
-    const remainingItems = importPreview.items.filter(
-      item => !selectedPreviewItemIds.has(item.id)
-    );
-    setImportPreview({ ...importPreview, items: remainingItems });
-    setSelectedPreviewItemIds(new Set());
-  };
-
-  const updatePreviewActualSpec = (itemId: string, actualProductionSpec: string) => {
-    if (!importPreview) return;
-    setImportPreview({
-      ...importPreview,
-      items: importPreview.items.map(item =>
-        item.id === itemId ? { ...item, actualProductionSpec } : item
-      )
-    });
-  };
-
-  const handleColumnExport = (status?: ProductionStatus) => {
-    const items = status ? activeProductionData.items.filter(i => i.status === status) : activeProductionData.items;
-    if (items.length === 0) return alert('暂无可导出的生产数据');
-    const sortedItems = sortProductionUnitsBySourceOrder(items);
-    const headers = ['编号', '设备名称', '清单规格/型号', '实际生产规格', '数量', '状态', '备注', '日期'];
-    const rows = sortedItems.map(item => [`"${item.serialNumber || ''}"`, `"${item.name}"`, `"${item.model || ''}"`, `"${item.actualProductionSpec ?? item.model ?? ''}"`, item.quantity, statusMeta[item.status].short, `"${item.notes || ''}"`, item.batchDate || ''].join(','));
-    const blob = new Blob(['\uFEFF' + [headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${activeProject?.name || '生产清单'}_${status ? statusMeta[status].short : '全部'}.csv`;
-    link.click();
-  };
-
-  const handleImport = (event: React.ChangeEvent<HTMLInputElement>, defaultStatus: ProductionStatus = 'Waiting') => {
-    const file = event.target.files?.[0];
-    if (!file || !activeProject || !canEditActiveProduction) {
-      event.target.value = '';
-      return;
+  const saveEditor = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editor) return;
+    let next: ProjectProduction;
+    if (editor.kind === 'note') {
+      next = { ...record, items: record.items.map(item => item.id === editor.item.id
+        ? { ...item, notes: editor.value, actualProductionSpec: editor.actualSpec } : item) };
+    } else if (editor.kind === 'shipment') {
+      if (editor.shipped && !isProductionShipmentDate(editor.date)) return;
+      next = editor.ids.reduce((current, id) => changeProductionShipment(current, id, editor.shipped, editor.date), record);
+    } else {
+      const { values, item } = editor;
+      const quantity = Number(values.quantity);
+      if (!values.name.trim() || !Number.isFinite(quantity) || quantity <= 0) return;
+      const updated = {
+        status: 'Waiting' as const, ...item, ...values, name: values.name.trim(), quantity,
+        id: item?.id || (crypto.randomUUID?.() ?? 'device-' + Date.now() + '-' + Math.random().toString(36).slice(2))
+      };
+      next = {
+        ...record,
+        items: item ? record.items.map(entry => entry.id === item.id ? updated : entry)
+          : appendProductionUnitsInSourceOrder(record.items, [updated])
+      };
     }
-    const fileName = file.name.toLowerCase();
-    if (fileName.endsWith('.xls') && !fileName.endsWith('.xlsx')) {
-      alert('暂不支持旧版 .xls 二进制格式，请在 Excel 中另存为 .xlsx 或 CSV 后导入');
-      event.target.value = '';
-      return;
+    if (await save(next)) {
+      if (editor.kind === 'device' && !editor.item) setActiveTableId('legacy');
+      setEditor(null);
     }
+  };
 
-    const reader = new FileReader();
-    reader.onload = async evt => {
-      try {
-        const newItems = fileName.endsWith('.xlsx')
-          ? await parseProductionXlsx(evt.target?.result as ArrayBuffer, defaultStatus)
-          : parseProductionCsv(String(evt.target?.result || ''), defaultStatus);
-        if (newItems.length === 0) {
-          alert('没有识别到有效设备行，请确认表格列为：设备名称、型号/规格、数量、状态、备注、日期');
-        } else {
-          setImportPreview({ fileName: file.name, items: newItems });
-          setSelectedPreviewItemIds(new Set());
-        }
-      } catch (error) {
-        alert(error instanceof Error ? error.message : '导入失败，请检查表格格式');
-      } finally {
-        event.target.value = '';
+  const deleteSelection = async () => {
+    if (!selectedIds.size || !window.confirm('确定删除选中的 ' + selectedIds.size + ' 条生产设备记录吗？')) return;
+    const nextDetails = { ...record.itemDetails };
+    for (const id of selectedIds) delete nextDetails[id];
+    if (await save({ ...record, itemDetails: nextDetails, items: record.items.filter(item => !selectedIds.has(item.id)) }, '已删除选中设备。')) {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const markProduction = async (status: 'Waiting' | 'InStock') => {
+    const nextDetails = { ...record.itemDetails };
+    const nextItems = record.items.map(item => {
+      if (!selectedIds.has(item.id)) return item;
+      if (item.status === 'Shipped') {
+        // 生产或入库标记可以调整，已发货设备的发货日期和状态继续有效。
+        nextDetails[item.id] = { ...nextDetails[item.id], statusBeforeShipment: status };
+        return item;
       }
-    };
-    if (fileName.endsWith('.xlsx')) reader.readAsArrayBuffer(file);
-    else reader.readAsText(file);
+      return { ...item, status };
+    });
+    await save({ ...record, items: nextItems, itemDetails: nextDetails });
   };
 
-  const confirmImportPreview = async () => {
-    if (!importPreview || importPreview.items.length === 0 || isImportSaving || !canEditActiveProduction) return;
-    setIsImportSaving(true);
-    const importedCount = importPreview.items.length;
-    try {
-      const saved = await updateItems(
-        appendProductionUnitsInSourceOrder(
-          activeProductionData.items,
-          importPreview.items
-        )
-      );
-      if (!saved) return;
-      setImportPreview(null);
-      setSelectedPreviewItemIds(new Set());
-      alert(`已写入并同步 ${importedCount} 条生产记录`);
-    } finally {
-      setIsImportSaving(false);
-    }
-  };
-
-  const openAddModal = (status: ProductionStatus) => {
-    if (!canEditActiveProduction) return;
-    setEditingItem(null);
-    setFormData({ serialNumber: '', name: '', model: '', actualProductionSpec: '', quantity: '', notes: '', batchDate: getBeijingDateString(), status });
-    setIsModalOpen(true);
-  };
-
-  const handleSave = () => {
-    if (!selectedProjectId || !formData.name || !canEditActiveProduction) return;
-    const quantity = Number(formData.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) return alert('请输入有效数量');
-    const nextItem: ProductionUnit = {
-      id: editingItem?.id || Math.random().toString(36).slice(2, 11),
-      serialNumber: formData.serialNumber.trim(),
-      sourceOrder: editingItem?.sourceOrder,
-      name: formData.name,
-      model: formData.model,
-      actualProductionSpec: formData.actualProductionSpec,
-      quantity,
-      notes: formData.notes,
-      batchDate: formData.batchDate,
-      status: formData.status
-    };
-    const items = editingItem
-      ? activeProductionData.items.map(item => item.id === editingItem.id ? nextItem : item)
-      : appendProductionUnitsInSourceOrder(activeProductionData.items, [nextItem]);
-    void updateItems(items);
-    setIsModalOpen(false);
-  };
-
-  const updateItemStatus = (id: string, status: ProductionStatus) => {
-    if (!canEditActiveProduction) return;
-    void updateItems(activeProductionData.items.map(item => item.id === id ? { ...item, status, batchDate: item.batchDate || getBeijingDateString() } : item));
-  };
-
-  const markAll = (status: ProductionStatus) => {
-    if (!canEditActiveProduction || activeProductionData.items.length === 0) return;
-    if (!window.confirm(`确定将当前工程所有设备标注为「${statusMeta[status].short}」吗？`)) return;
-    void updateItems(activeProductionData.items.map(item => ({ ...item, status, batchDate: item.batchDate || getBeijingDateString() })));
+  const renderActions = (item: ProductionUnit) => {
+    const details = record.itemDetails?.[item.id];
+    const shipped = item.status === 'Shipped';
+    const shipment = shipped ? '已发货 · ' + (details?.shipmentDate || '日期未登记') : '未发货';
+    return (
+      <>
+        <td className={cellClass + ' min-w-48 border-l-2 border-l-emerald-400'}>
+          <div className="flex items-start gap-2">
+            {canEdit && <input type="checkbox" className="mt-2" aria-label={'选择 ' + item.name} checked={selectedIds.has(item.id)}
+              onChange={() => toggleSelection(item.id)} />}
+            {canEdit ? <button type="button" disabled={saving} className="min-h-8 flex-1 whitespace-pre-wrap break-words text-left text-emerald-800 dark:text-emerald-300"
+              onClick={() => {
+                setFeedback('');
+                setEditor({ kind: 'note', item, value: item.notes || '', actualSpec: item.actualProductionSpec ?? item.model ?? '' });
+              }}>{item.notes || '填写备注'}</button>
+              : <span className="whitespace-pre-wrap break-words">{item.notes || '—'}</span>}
+            {canEdit && activeTable.id === 'legacy' && (
+              <button type="button" disabled={saving} className="rounded p-1 text-slate-600 dark:text-slate-300" aria-label={'修改设备 ' + item.name}
+                onClick={() => setEditor({ kind: 'device', item, values: {
+                  name: item.name, serialNumber: item.serialNumber || '', model: item.model || '',
+                  actualProductionSpec: item.actualProductionSpec ?? item.model ?? '',
+                  quantity: String(item.quantity), batchDate: item.batchDate || ''
+                } })}><Edit2 size={15} /></button>
+            )}
+          </div>
+        </td>
+        <td className={cellClass + ' min-w-28'}>
+          {canEdit ? <select className={controlClass} aria-label={item.name + '设备来源'} value={details?.sourcing || ''} disabled={saving}
+            onChange={event => {
+              const value = event.target.value as ProductionItemDetails['sourcing'] | '';
+              updateDetails(item.id, { sourcing: value || undefined });
+            }}>
+            <option value="">待确认</option>
+            <option value="InHouse">自产</option>
+            <option value="Outsourced">外协采购</option>
+          </select> : (details?.sourcing ? productionSourcingLabels[details.sourcing] : '待确认')}
+        </td>
+        <td className={cellClass + ' min-w-32'}>
+          {canEdit ? <label className="flex min-h-9 items-center gap-2 whitespace-nowrap">
+            <input type="checkbox" aria-label={item.name + '需外协安装'} checked={Boolean(details?.outsourcedInstallation)} disabled={saving}
+              onChange={event => updateDetails(item.id, { outsourcedInstallation: event.target.checked })} /> 需外协安装
+          </label> : (details?.outsourcedInstallation ? '需要' : '—')}
+        </td>
+        <td className={cellClass + ' min-w-44'}>
+          {canEdit ? <button type="button" className={controlClass + (shipped ? ' text-emerald-800 dark:text-emerald-300' : '')}
+            aria-label={item.name + '发货状态 · ' + shipment} disabled={saving}
+            onClick={() => openShipment([item.id])}>{shipment}</button> : shipment}
+        </td>
+      </>
+    );
   };
 
   if (!selectedProjectId) {
@@ -427,153 +341,108 @@ const ProductionProgress: React.FC<ProductionProgressProps> = ({ projects, produ
   }
 
   return (
-    <div className="max-w-7xl mx-auto h-full flex flex-col transition-all pb-8">
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
+    <div className="mx-auto max-w-[100rem] space-y-4 pb-10">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <button onClick={() => setSelectedProjectId(null)} className="flex items-center gap-1.5 text-slate-600 hover:text-primary-600 transition-all font-black text-xs tracking-widest mb-3"><ArrowLeft className="w-4 h-4" /> 返回工程生产汇总</button>
-          <h2 className="font-black text-2xl text-slate-900 dark:text-white truncate max-w-3xl">{activeProject?.name}</h2>
-          <p className="text-xs font-bold text-slate-400 mt-1">{activeProject?.clientName} · {activeProject?.manager}</p>
+          <button type="button" disabled={saving || loadingFile} className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-300"
+            onClick={() => setSelectedProjectId(null)}><ArrowLeft size={16} />返回工程生产汇总</button>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{project?.name}</h2>
+          <p className="text-sm text-slate-500">{project?.clientName} · {project?.manager}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canEditActiveProduction ? (
-            <>
-              <input ref={importInputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={e => handleImport(e, 'Waiting')} />
-              <button onClick={() => importInputRef.current?.click()} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 flex items-center gap-2"><Upload className="w-4 h-4" /> 导入表格</button>
-            </>
-          ) : (
-            <span className="flex items-center rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-xs font-black text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">仅查看：非本工程项目经理</span>
-          )}
-          <button onClick={() => handleColumnExport()} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 flex items-center gap-2"><Download className="w-4 h-4" /> 导出全部</button>
-          {canEditActiveProduction && (
-            <>
-              <button onClick={toggleAllItemSelection} disabled={activeProductionData.items.length === 0} className="px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-slate-600 dark:text-slate-300 hover:border-primary-500 disabled:cursor-not-allowed disabled:opacity-50">{allItemsSelected ? '取消全选' : '全选设备'}</button>
-              <button onClick={() => void deleteSelectedItems()} disabled={selectedItemIds.size === 0} className="px-4 py-3 rounded-2xl bg-red-50 text-red-600 border border-red-100 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"><Trash2 className="w-4 h-4" /> 删除选中{selectedItemIds.size > 0 ? ` (${selectedItemIds.size})` : ''}</button>
-              <button onClick={() => markAll('Waiting')} className="px-4 py-3 rounded-2xl bg-amber-50 text-amber-700 border border-amber-100 text-xs font-black">全部待生产</button>
-              <button onClick={() => markAll('InStock')} className="px-4 py-3 rounded-2xl bg-sky-50 text-sky-700 border border-sky-100 text-xs font-black">全部已生产/入库</button>
-              <button onClick={() => markAll('Shipped')} className="px-4 py-3 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-black">全部已发货</button>
-            </>
-          )}
+          {canEdit ? <>
+            <input ref={fileInput} type="file" className="hidden" accept=".xlsx,.xls,.docx,.csv,.txt" onChange={importFile} />
+            <button type="button" className={primaryClass + ' inline-flex min-h-10 items-center gap-2'} disabled={saving || loadingFile}
+              onClick={() => fileInput.current?.click()}><Upload size={16} />{loadingFile ? '正在识别…' : '导入 Excel / Word'}</button>
+            <button type="button" className={buttonClass} disabled={saving}
+              onClick={() => setEditor({ kind: 'device', values: blankItem() })}><Plus size={16} />新增设备</button>
+          </> : <span className="px-2 py-2 text-sm text-slate-500">仅查看</span>}
+          <button type="button" className={buttonClass} disabled={!tables.length || saving} onClick={() =>
+            void exportProductionWorkbook(record, tables).catch(() => setFeedback('导出失败，请重试。'))
+          }><Download size={16} />导出清单</button>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 min-h-[34rem]">
-        {(['Waiting', 'InStock', 'Shipped'] as ProductionStatus[]).map(status => {
-          const items = sortProductionUnitsBySourceOrder(activeProductionData.items.filter(i => i.status === status));
-          return (
-            <section key={status} className="bg-slate-100/80 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden shadow-inner">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800">
-                <span className="font-black text-xs text-slate-700 dark:text-slate-200 flex items-center gap-2">{statusMeta[status].icon}{statusMeta[status].label}<b className="text-slate-400">{items.reduce((sum, item) => sum + item.quantity, 0)}</b></span>
-                <div className="flex gap-1.5">{canEditActiveProduction && <button onClick={() => openAddModal(status)} className="p-2 hover:bg-primary-50 dark:hover:bg-primary-900/40 rounded-xl text-primary-600"><Plus className="w-4 h-4" /></button>}<button onClick={() => handleColumnExport(status)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-400"><Download className="w-4 h-4" /></button></div>
-              </div>
-              <div className="p-4 space-y-3 overflow-y-auto flex-1 custom-scrollbar">
-                {items.length === 0 ? <div className="py-20 text-center text-slate-300"><FileSpreadsheet className="w-12 h-12 mx-auto mb-2 opacity-40" /><p className="text-xs font-black">暂无记录</p></div> : items.map(item => (
-                  <div key={item.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-all hover:border-primary-500 group">
-                    <div className="flex items-start gap-3">
-                      {canEditActiveProduction && (
-                        <input
-                          type="checkbox"
-                          aria-label={`选择设备 ${item.name}`}
-                          checked={selectedItemIds.has(item.id)}
-                          onChange={() => toggleItemSelection(item.id)}
-                          className="mt-1 h-4 w-4 shrink-0 accent-primary-600"
-                        />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="mb-1 flex items-center gap-2">
-                              {item.serialNumber && <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[9px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-300">编号 {item.serialNumber}</span>}
-                              <p className="truncate text-sm font-black text-slate-900 dark:text-white">{item.name}</p>
-                            </div>
-                            <p className="truncate text-[10px] font-bold text-slate-400">清单规格：{item.model || '未填写'}</p>
-                            <p className="mt-1 truncate text-[10px] font-black text-primary-600 dark:text-primary-400">实际生产规格：{item.actualProductionSpec === undefined ? (item.model || '待填写') : (item.actualProductionSpec || '待填写')}</p>
-                          </div>
-                          <span className="text-primary-600 dark:text-primary-400 font-black text-xs">x {item.quantity}</span>
-                        </div>
-                      </div>
-                    </div>
-                    {item.notes && <p className="mt-3 text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-xl border border-slate-100 dark:border-slate-700">{item.notes}</p>}
-                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap justify-between gap-2">
-                      <span className="text-[9px] font-black text-slate-400">{item.batchDate || '-'}</span>
-                      {canEditActiveProduction && <div className="flex gap-1">
-                        {(['Waiting', 'InStock', 'Shipped'] as ProductionStatus[]).map(nextStatus => <button key={nextStatus} onClick={() => updateItemStatus(item.id, nextStatus)} className={`px-2 py-1 rounded-lg text-[9px] font-black border ${item.status === nextStatus ? 'bg-primary-600 text-white border-primary-600' : 'text-slate-400 border-slate-200 dark:border-slate-700 hover:text-primary-600'}`}>{statusMeta[nextStatus].short}</button>)}
-                        <button onClick={() => { setEditingItem(item); setFormData({ serialNumber: item.serialNumber || '', name: item.name, model: item.model, actualProductionSpec: item.actualProductionSpec ?? item.model ?? '', quantity: item.quantity.toString(), notes: item.notes || '', batchDate: item.batchDate || getBeijingDateString(), status: item.status }); setIsModalOpen(true); }} className="p-1 text-slate-400 hover:text-primary-600"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => void deleteSingleItem(item.id)} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-
-      {importPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl dark:bg-slate-800">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6 dark:border-slate-700">
-              <div>
-                <h3 className="text-xl font-black text-slate-900 dark:text-white">导入前确认</h3>
-                <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{importPreview.fileName} · 已识别 {importPreview.items.length} 条，按原表行顺序显示；实际生产规格可在写入前直接修改。</p>
-              </div>
-              <button onClick={() => { setImportPreview(null); setSelectedPreviewItemIds(new Set()); }} className="rounded-2xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="overflow-y-auto p-5 custom-scrollbar">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs font-black text-slate-500">已选择 {selectedPreviewItemIds.size} 项</p>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={toggleAllPreviewItemSelection} disabled={importPreview.items.length === 0} className="rounded-xl border border-slate-200 px-4 py-2 text-[10px] font-black text-slate-600 hover:border-primary-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300">{allPreviewItemsSelected ? '取消全选' : '全选识别设备'}</button>
-                  <button onClick={deleteSelectedPreviewItems} disabled={selectedPreviewItemIds.size === 0} className="flex items-center gap-1.5 rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-[10px] font-black text-red-600 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /> 删除选中</button>
-                </div>
-              </div>
-              <div className="min-w-[58rem]">
-                <div className="grid grid-cols-12 gap-3 rounded-2xl bg-slate-100 px-4 py-3 text-[10px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                  <span className="col-span-1">选择</span><span className="col-span-1">编号</span><span className="col-span-2">名称</span><span className="col-span-2">清单规格</span><span className="col-span-3">实际生产规格</span><span className="col-span-1">数量</span><span className="col-span-2">状态</span>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {sortProductionUnitsBySourceOrder(importPreview.items).map(item => (
-                    <div key={item.id} className="grid grid-cols-12 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                      <span className="col-span-1"><input type="checkbox" aria-label={`选择识别设备 ${item.name}`} checked={selectedPreviewItemIds.has(item.id)} onChange={() => togglePreviewItemSelection(item.id)} className="h-4 w-4 accent-primary-600" /></span>
-                      <span className="col-span-1 truncate text-slate-500">{item.serialNumber || '-'}</span>
-                      <span className="col-span-2 truncate font-black text-slate-900 dark:text-white">{item.name}</span>
-                      <span className="col-span-2 truncate">{item.model || '未识别规格'}</span>
-                      <span className="col-span-3"><input value={item.actualProductionSpec ?? item.model ?? ''} onChange={event => updatePreviewActualSpec(item.id, event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-900 outline-none focus:border-primary-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></span>
-                      <span className="col-span-1">{item.quantity}</span>
-                      <span className="col-span-2">{statusMeta[item.status].short}</span>
-                    </div>
-                  ))}
-                  {importPreview.items.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 py-16 text-center text-xs font-black text-slate-400 dark:border-slate-700">已删除全部识别设备，请取消后重新导入或关闭窗口。</div>}
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 border-t border-slate-200 p-5 dark:border-slate-700">
-              <button disabled={isImportSaving} onClick={() => { setImportPreview(null); setSelectedPreviewItemIds(new Set()); }} className="px-6 py-3 text-xs font-black text-slate-500 disabled:cursor-not-allowed disabled:opacity-50">取消导入</button>
-              <button disabled={isImportSaving || importPreview.items.length === 0} onClick={confirmImportPreview} className="rounded-2xl bg-primary-600 px-8 py-3 text-xs font-black text-white shadow-xl shadow-primary-500/20 hover:bg-primary-700 disabled:cursor-wait disabled:opacity-60">{isImportSaving ? '正在同步…' : '确认写入并同步'}</button>
-            </div>
+      <p role="status" className={feedback ? 'rounded-lg bg-white px-3 py-2 text-sm dark:bg-slate-800' : 'sr-only'}>{feedback}</p>
+      {tables.length > 1 && (
+        <nav aria-label="生产清单表格" className="flex flex-wrap gap-2">
+          {tables.map(table => <button type="button" key={table.id} disabled={saving} aria-pressed={activeTable.id === table.id}
+            className={buttonClass + (activeTable.id === table.id ? ' ring-2 ring-emerald-500' : '')}
+            title={table.fileName} onClick={() => { setActiveTableId(table.id); setSelectedIds(new Set()); }}>{table.title}</button>)}
+        </nav>
+      )}
+      {activeTable ? (
+        <section className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-auto text-sm text-slate-600 dark:text-slate-300">
+              {activeTable.fileName ? activeTable.fileName + ' · ' : ''}{visibleItemIds.length} 条设备
+            </span>
+            {canEdit && visibleItemIds.length > 0 && <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={visibleItemIds.every(id => selectedIds.has(id))}
+                onChange={event => setSelectedIds(new Set(event.target.checked ? visibleItemIds : []))} /> 全选此表
+            </label>}
+            {canEdit && selectedIds.size > 0 && (
+              <>
+                <button type="button" className={buttonClass} disabled={saving} onClick={() => openShipment([...selectedIds])}>批量标注发货</button>
+                <button type="button" className={buttonClass} disabled={saving} onClick={() => void markProduction('Waiting')}>标记待生产</button>
+                <button type="button" className={buttonClass} disabled={saving} onClick={() => void markProduction('InStock')}>标记已入库</button>
+                <button type="button" className={buttonClass + ' text-red-700 dark:text-red-300'} disabled={saving}
+                  onClick={() => void deleteSelection()}>删除选中（{selectedIds.size}）</button>
+              </>
+            )}
           </div>
+          <ProductionSheet table={activeTable} items={items} actionHeaders={productionActionHeaders} renderActions={renderActions} />
+        </section>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900">
+          {canEdit ? '暂无设备。导入 Excel 或 Word 表格，也可以手动新增。' : '暂无设备。'}
         </div>
       )}
-
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95">
-            <div className="flex justify-between items-center mb-6 border-b dark:border-slate-700 pb-4"><h3 className="text-xl font-black text-slate-900 dark:text-white">{editingItem ? '修改生产设备' : '新增生产设备'}</h3><button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full"><X className="w-5 h-5 text-slate-500" /></button></div>
-            <div className="space-y-4">
-              <div><label className="block text-[10px] font-black text-slate-400 mb-1">编号 / 序号</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.serialNumber} onChange={e => setFormData({ ...formData, serialNumber: e.target.value })} /></div>
-              <div><label className="block text-[10px] font-black text-slate-400 mb-1">设备名称 *</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} /></div>
-              <div><label className="block text-[10px] font-black text-slate-400 mb-1">清单规格 / 型号（原表）</label><input className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.model} onChange={e => setFormData({ ...formData, model: e.target.value })} /></div>
-              <div><label className="block text-[10px] font-black text-primary-500 mb-1">实际生产规格（可编辑）</label><input className="w-full border-2 border-primary-100 dark:border-primary-900/60 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-primary-50/40 dark:bg-primary-950/20 text-slate-900 dark:text-white font-black" value={formData.actualProductionSpec} onChange={e => setFormData({ ...formData, actualProductionSpec: e.target.value })} placeholder="填写最终下单或实际制作尺寸" /></div>
-              <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 mb-1">数量 *</label><input type="number" className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.quantity} onChange={e => setFormData({ ...formData, quantity: e.target.value })} /></div><div><label className="block text-[10px] font-black text-slate-400 mb-1">状态</label><select className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value as ProductionStatus })}><option value="Waiting">待生产</option><option value="InStock">已生产/入库</option><option value="Shipped">已发货</option></select></div></div>
-              <div><label className="block text-[10px] font-black text-slate-400 mb-1">日期 / 批次</label><input type="date" className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black" value={formData.batchDate} onChange={e => setFormData({ ...formData, batchDate: e.target.value })} /></div>
-              <div><label className="block text-[10px] font-black text-slate-400 mb-1">备注</label><textarea className="w-full border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3 h-24 outline-none focus:border-primary-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-black resize-none" value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} /></div>
+      {preview && <ProductionImportDialog tables={preview} saving={saving} feedback={feedback} onClose={() => setPreview(null)} onSave={confirmImport} />}
+      {editor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <form onSubmit={saveEditor} role="dialog" aria-modal="true"
+            aria-label={editor.kind === 'note' ? '生产备注' : editor.kind === 'shipment' ? '发货状态' : '设备信息'}
+            className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 text-slate-900 shadow-xl dark:bg-slate-900 dark:text-slate-100">
+            {editor.kind === 'note' ? <>
+              <h3 className="text-lg font-bold">{editor.item.name} · 生产备注</h3>
+              <textarea autoFocus aria-label="生产备注" className={controlClass + ' min-h-28 w-full'} value={editor.value}
+                onChange={event => setEditor({ ...editor, value: event.target.value })} />
+              <label className="block text-sm">实际生产规格
+                <input className={controlClass + ' mt-1 block w-full'} value={editor.actualSpec}
+                  onChange={event => setEditor({ ...editor, actualSpec: event.target.value })} />
+              </label>
+            </> : editor.kind === 'shipment' ? <>
+              <h3 className="text-lg font-bold">发货状态 · {editor.ids.length > 1 ? editor.ids.length + ' 条设备' : items.get(editor.ids[0])?.name}</h3>
+              <label className="block text-sm">发货状态 <select autoFocus className={controlClass} value={editor.shipped ? 'yes' : 'no'}
+                onChange={event => setEditor({ ...editor, shipped: event.target.value === 'yes' })}>
+                <option value="no">未发货</option>
+                <option value="yes">已发货</option>
+              </select></label>
+              {editor.shipped && (
+                <label className="block text-sm">发货日期 <input required className={controlClass} type="date" value={editor.date}
+                  onChange={event => setEditor({ ...editor, date: event.target.value })} /></label>
+              )}
+            </> : <>
+              <h3 className="text-lg font-bold">{editor.item ? '修改设备' : '新增设备'}</h3>
+              {([
+                ['serialNumber', '编号', 'text'], ['name', '设备名称', 'text'], ['model', '清单规格 / 型号', 'text'],
+                ['actualProductionSpec', '实际生产规格', 'text'], ['quantity', '数量', 'number'], ['batchDate', '批次日期', 'date']
+              ] as const).map(([field, label, type]) => (
+                <label key={field} className="block text-sm">{label}
+                  <input className={controlClass + ' mt-1 block w-full'} value={editor.values[field]} type={type}
+                    required={field === 'name' || field === 'quantity'} step={field === 'quantity' ? 'any' : undefined}
+                    onChange={event => setEditor({ ...editor, values: { ...editor.values, [field]: event.target.value } })} />
+                </label>
+              ))}
+            </>}
+            {feedback && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">{feedback}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={buttonClass} disabled={saving} onClick={() => setEditor(null)}>取消</button>
+              <button type="submit" className={primaryClass} disabled={saving}>{saving ? '正在保存…' : '保存'}</button>
             </div>
-            <div className="flex justify-end gap-3 mt-8 pt-5 border-t dark:border-slate-700"><button onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-slate-500 font-black">取消</button><button onClick={handleSave} className="px-8 py-3 bg-primary-600 text-white rounded-2xl hover:bg-primary-700 font-black flex items-center gap-2"><Save className="w-4 h-4" />保存</button></div>
-          </div>
+          </form>
         </div>
       )}
     </div>
   );
-};
-
-export default ProductionProgress;
+}

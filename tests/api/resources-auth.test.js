@@ -631,6 +631,45 @@ test('sales project manager can create and update production data only for the a
   assert.equal(pool.resources.get('production').has('p-hidden'), false);
 });
 
+test('existing account carries a production record through new and old frontend writes', async () => {
+  const { app } = await createResourceTestApp();
+  const cookie = await loginSalesManager(app);
+  const legacy = {
+    id: 'p-sales', projectId: 'p-sales', projectName: 'Sales Project', projectCode: 'A-01',
+    items: [{ id: 'old-device', name: '工作台', model: '1200×600×800', quantity: 1, notes: '原记录', status: 'InStock' }]
+  };
+  const create = payload => request(app).post('/production').set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test').send(payload);
+  const read = async () => {
+    const response = await request(app).get('/production').set('Cookie', cookie).expect(200);
+    return response.body.find(record => record.id === legacy.id);
+  };
+  const update = payload => request(app).put('/production/p-sales').set('Cookie', cookie)
+    .set('Origin', 'https://erp.example.test').send(payload);
+
+  await create(legacy).expect(201);
+  const before = await read();
+  assert.deepEqual(before.items, legacy.items);
+  const newDevice = { id: 'table-1:1', name: '蒸饭柜', model: '24 盘', notes: '接线确认', quantity: 1, status: 'Shipped' };
+  const sourceTables = [{ id: 'table-1', title: '主厨房', fileName: '清单.docx', columnCount: 2, rows: [
+    { cells: [{ column: 0, text: '热加工区', colSpan: 2 }] },
+    { itemId: newDevice.id, cells: [{ column: 0, text: '蒸饭柜' }, { column: 1, text: '380 V\n24 kW' }] }
+  ] }];
+  const itemDetails = { [newDevice.id]: { sourcing: 'Outsourced', outsourcedInstallation: true, shipmentDate: '2026-11-22' } };
+  await update({ ...before, items: [...before.items, newDevice], sourceTables, itemDetails }).expect(200);
+
+  // 回退前端通过保留工程记录的其他键、只替换 items 的方式保存旧页面修改。
+  const duringRollback = await read();
+  assert.deepEqual(duringRollback.items, [...legacy.items, newDevice]);
+  await update({ ...duringRollback, items: [{ ...legacy.items[0], notes: '旧版补录' }, newDevice] }).expect(200);
+
+  const after = await read();
+  assert.deepEqual(after.sourceTables, sourceTables);
+  assert.deepEqual(after.itemDetails, itemDetails);
+  assert.equal(after.items[0].notes, '旧版补录');
+  assert.deepEqual(after.items[1], newDevice);
+});
+
 test('update rejects retargeting a hidden record into a visible project', async () => {
   const { app, pool } = await createResourceTestApp();
   const cookie = await login(app);
